@@ -1,0 +1,6 @@
+# বিল্ড কমান্ড ও publish ফোল্ডার এখানে নেই, কারণ দুটো সাইটের জন্য আলাদা।
+# Netlify-তে প্রতিটা সাইটের Build settings-এ বসান (README_DEPLOY.md দেখুন)।
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

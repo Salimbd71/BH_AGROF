@@ -1,0 +1,6 @@
+{
+  "name": "BH Agro Ltd. - Animal Health ERP & SR Management",
+  "description": "Comprehensive SR Order Booking, Customer Management, Inventory, Price & Discount Manager, and Sales Analytics platform for BH Agro Ltd. with Firebase and offline support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

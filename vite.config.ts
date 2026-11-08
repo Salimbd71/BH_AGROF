@@ -1,0 +1,49 @@
+import tailwindcss from '@tailwindcss/vite';
+import react from '@vitejs/plugin-react';
+import path from 'path';
+import {defineConfig, type Plugin} from 'vite';
+
+/**
+ * দুটো আলাদা সাইট একই কোড থেকে বিল্ড হয়:
+ *   npm run build:sr     -> dist/sr     (এসআর/ইউজার সাইট)
+ *   npm run build:admin  -> dist/admin  (অ্যাডমিন সাইট)
+ * mode-এর নাম (sr / admin) দিয়েই কোড বুঝে নেয় কোন সাইট বিল্ড হচ্ছে।
+ */
+function perSiteHtml(mode: string): Plugin {
+  return {
+    name: 'per-site-html',
+    transformIndexHtml(html) {
+      const isAdmin = mode === 'admin';
+      const title = isAdmin ? 'BH Agro Ltd. - Admin Panel' : 'BH Agro Ltd. - SR Portal';
+      let out = html.replace(/<title>[\s\S]*?<\/title>/, `<title>${title}</title>`);
+      if (isAdmin) {
+        // অ্যাডমিন সাইট সার্চ ইঞ্জিনে আসবে না
+        out = out.replace('<head>', '<head>\n  <meta name="robots" content="noindex, nofollow" />');
+      }
+      return out;
+    }
+  };
+}
+
+export default defineConfig(({mode}) => {
+  const site = mode === 'admin' ? 'admin' : 'sr';
+  return {
+    plugins: [react(), tailwindcss(), perSiteHtml(site)],
+    resolve: {
+      alias: {
+        '@': path.resolve(__dirname, '.'),
+      },
+    },
+    build: {
+      outDir: `dist/${site}`,
+      emptyOutDir: true,
+    },
+    server: {
+      // HMR is disabled in AI Studio via DISABLE_HMR env var.
+      // Do not modify—file watching is disabled to prevent flickering during agent edits.
+      hmr: process.env.DISABLE_HMR !== 'true',
+      // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
+      watch: process.env.DISABLE_HMR === 'true' ? null : {},
+    },
+  };
+});
