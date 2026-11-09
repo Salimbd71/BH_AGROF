@@ -75,6 +75,8 @@ export interface SRUser {
   email?: string;
   target: number;
   active: boolean;
+  /** সফট ডিলিটের সময়। থাকলে এসআর লগইন করতে পারবে না, কিন্তু অর্ডার/রিপোর্টে থাকবে */
+  deletedAt?: string;
   pin?: string;
 }
 
@@ -93,6 +95,10 @@ export interface AdminUser {
 
 export const DB_STORAGE_KEY = 'bioherbs_agrovet_db_v5';
 import { FIREBASE_CONFIG_KEY, getFirebaseConfig } from '../config/firebase.ts';
+
+const CART_STORAGE_KEY = 'bhagro_cart_v1';
+const PENDING_SYNC_KEY = 'bhagro_pending_sync_v1';
+const SYNCED_IDS_KEY = 'bhagro_synced_ids_v1';
 import { APP_RULES, canLoginAs } from '../config/appMode.ts';
 export { FIREBASE_CONFIG_KEY };
 export const PREF_LANG_KEY = 'bioherbs_lang';
@@ -261,7 +267,7 @@ export const I18N: Record<string, Record<string, string>> = {
     allSRsOption: 'All SRs',
     assignedToYou: 'Assigned to You',
     noCustomersAssigned: 'No Customers Assigned',
-    noCustomersAssignedSub: 'Please request new customer registration or have admin assign customers to your SR ID.',
+    noCustomersAssignedSub: 'Please request new customer registration or ask the head office to assign customers to your SR ID.',
   },
   bn: {
     appName: 'বিএইচ এগ্রো লি.',
@@ -453,6 +459,10 @@ export class Store {
   firebaseApp: any;
   firebaseDb: any;
   isFirebaseReady: boolean;
+  /** Firebase সার্ভারের সাথে এখন যুক্ত কিনা (null = জানা নেই) */
+  cloudConnected: boolean | null = null;
+  private saveSeq = 0;
+  private resyncStarted = false;
 
   constructor() {
     this.lang = localStorage.getItem(PREF_LANG_KEY) || 'en'; // Default English
@@ -495,6 +505,7 @@ export class Store {
 
     this.initTheme();
     this.loadDatabase();
+    if (this.authSession.isLoggedIn) this.restoreCart();
   }
 
   initTheme() {
@@ -573,21 +584,158 @@ export class Store {
     }
   }
 
+
+  // ================= Cart helpers (কার্ট ফোনে সেভ থাকে) =================
+  /** ফ্রি ইউনিট হিসাব (ট্রেড অফার অনুযায়ী) */
+  calcFreeQty(prod: Product, qty: number): number {
+    const offer = prod.tradeOffer || '';
+    if (offer.includes('10+1')) return Math.floor(qty / 10);
+    if (offer.includes('20+2')) return Math.floor(qty / 20) * 2;
+    if (offer.includes('25+3')) return Math.floor(qty / 25) * 3;
+    if (offer.includes('15+1')) return Math.floor(qty / 15);
+    return 0;
+  }
+
+  /** কার্টে প্রোডাক্টের পরিমাণ বসায় (০ হলে সরিয়ে দেয়) */
+  setCartItem(prod: Product, qty: number) {
+    if (qty <= 0) {
+      delete this.cart.items[prod.id];
+      return;
+    }
+    this.cart.items[prod.id] = {
+      product: prod,
+      qty,
+      freeQty: this.calcFreeQty(prod, qty),
+      total: qty * prod.tradePrice
+    };
+  }
+
+  persistCart() {
+    try {
+      const owner = this.authSession.user?.id;
+      if (!owner) return;
+      const items: Record<string, number> = {};
+      Object.keys(this.cart.items).forEach(k => { items[k] = this.cart.items[k].qty; });
+      localStorage.setItem(CART_STORAGE_KEY, JSON.stringify({
+        owner, customerId: this.cart.customerId, discount: this.cart.discount, notes: this.cart.notes, items
+      }));
+    } catch { /* storage full/blocked */ }
+  }
+
+  /** লগইনকারীর সেভ করা কার্ট ফিরিয়ে আনে (অন্যের কার্ট কখনো না) */
+  restoreCart() {
+    try {
+      const owner = this.authSession.user?.id;
+      const raw = localStorage.getItem(CART_STORAGE_KEY);
+      if (!owner || !raw) return;
+      const saved = JSON.parse(raw);
+      if (saved.owner !== owner) return;
+      this.cart = { customerId: saved.customerId || '', items: {}, discount: Number(saved.discount) || 0, notes: saved.notes || '' };
+      Object.keys(saved.items || {}).forEach(id => {
+        const prod = (this.db.products || []).find(p => p.id === id);
+        const qty = Math.min(Number(saved.items[id]) || 0, prod ? prod.stock : 0);
+        if (prod && qty > 0) this.setCartItem(prod, qty);
+      });
+    } catch { /* ignore corrupt cart */ }
+  }
+
+  /** দাম/স্টক বদলালে কার্টের আইটেম নতুন প্রোডাক্ট তথ্যের সাথে মিলিয়ে নেয় */
+  syncCartWithProducts() {
+    Object.keys(this.cart.items).forEach(id => {
+      const prod = (this.db.products || []).find(p => p.id === id);
+      if (!prod || prod.stock <= 0) { delete this.cart.items[id]; return; }
+      this.setCartItem(prod, Math.min(this.cart.items[id].qty, prod.stock));
+    });
+  }
+
+  // ================= অফলাইন সিঙ্ক =================
+  get hasPendingSync(): boolean {
+    try { return localStorage.getItem(PENDING_SYNC_KEY) === '1'; } catch { return false; }
+  }
+
+  private setPending(v: boolean) {
+    try {
+      if (v) localStorage.setItem(PENDING_SYNC_KEY, '1'); else localStorage.removeItem(PENDING_SYNC_KEY);
+    } catch { /* ignore */ }
+    if (!v) this.resyncStarted = false;
+    this.emitNetChange();
+  }
+
+  emitNetChange() {
+    try {
+      if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('bhagro:net'));
+      }
+    } catch { /* ignore */ }
+  }
+
+  private loadSyncedIds(): { orders: Set<string>; customers: Set<string> } {
+    try {
+      const raw = JSON.parse(localStorage.getItem(SYNCED_IDS_KEY) || '{}');
+      return { orders: new Set<string>(raw.orders || []), customers: new Set<string>(raw.customers || []) };
+    } catch {
+      return { orders: new Set<string>(), customers: new Set<string>() };
+    }
+  }
+
+  private saveSyncedIds(orders: string[], customers: string[]) {
+    try { localStorage.setItem(SYNCED_IDS_KEY, JSON.stringify({ orders, customers })); } catch { /* ignore */ }
+  }
+
+  private buildCloudPayload(): Record<string, any> {
+    const payload: Record<string, any> = { lastUpdated: this.db.lastUpdated };
+    APP_RULES.writablePaths.forEach(path => { payload[path] = (this.db as any)[path] || []; });
+    return payload;
+  }
+
+  private pushToCloud() {
+    if (!(this.isFirebaseReady && this.firebaseDb)) return;
+    const track = APP_RULES.mode === 'sr';
+    const seq = ++this.saveSeq;
+    try {
+      this.firebaseDb.ref('bioherbs_agrovet').update(this.buildCloudPayload())
+        .then(() => { if (track && seq === this.saveSeq) this.setPending(false); })
+        .catch((err: any) => console.warn('Firebase sync warning:', err));
+    } catch (e) {
+      console.warn('Firebase sync failed:', e);
+    }
+  }
+
+  /**
+   * ফোনে সেভ হয়েছে কিন্তু ক্লাউডে পৌঁছায়নি এমন নতুন অর্ডার/কাস্টমার ক্লাউডের ডাটার সাথে জুড়ে দেয়।
+   * (অ্যাডমিন যা মুছে দিয়েছে তা ফিরে আসে না)
+   */
+  private mergeUnsynced(remote: { products: Product[]; customers: Customer[]; orders: Order[]; srs: SRUser[]; admins: AdminUser[] }) {
+    const synced = this.loadSyncedIds();
+    const remoteOrderIds = new Set(remote.orders.map(o => o.id));
+    const remoteCustIds = new Set(remote.customers.map(c => c.id));
+    const newOrders = (this.db.orders || []).filter(o => !remoteOrderIds.has(o.id) && !synced.orders.has(o.id));
+    const newCustomers = (this.db.customers || []).filter(c => !remoteCustIds.has(c.id) && !synced.customers.has(c.id));
+
+    const products = remote.products.map(p => ({ ...p }));
+    newOrders.forEach(o => o.items.forEach(it => {
+      const prod = products.find(p => p.id === it.productId);
+      if (prod) prod.stock = Math.max(0, prod.stock - it.qty);
+    }));
+
+    return {
+      merged: {
+        ...remote,
+        products,
+        orders: [...newOrders, ...remote.orders],
+        customers: [...remote.customers, ...newCustomers]
+      },
+      added: newOrders.length + newCustomers.length
+    };
+  }
+
   saveDatabase() {
     this.db.lastUpdated = new Date().toISOString();
     localStorage.setItem(DB_STORAGE_KEY, JSON.stringify(this.db));
 
-    if (this.isFirebaseReady && this.firebaseDb) {
-      try {
-        // শুধু এই সাইটের রুলসে অনুমোদিত অংশগুলো লেখা হবে; বাকি অংশ অক্ষত থাকবে
-        const payload: Record<string, any> = { lastUpdated: this.db.lastUpdated };
-        APP_RULES.writablePaths.forEach(path => { payload[path] = (this.db as any)[path] || []; });
-        this.firebaseDb.ref('bioherbs_agrovet').update(payload)
-          .catch((err: any) => console.warn('Firebase sync warning:', err));
-      } catch (e) {
-        console.warn('Firebase sync failed:', e);
-      }
-    }
+    // এসআর সাইট: ক্লাউডে পৌঁছানো নিশ্চিত না হওয়া পর্যন্ত "সিঙ্ক বাকি" চিহ্ন থাকে
+    if (APP_RULES.mode === 'sr') this.setPending(true);
+    this.pushToCloud();
   }
 
   clearLocalCache() {
@@ -622,19 +770,44 @@ export class Store {
           const srs = Array.isArray(target.srs) ? target.srs : (target.srs ? Object.values(target.srs) : []);
           const admins = Array.isArray(target.admins) ? target.admins : (target.admins ? Object.values(target.admins) : []);
 
-          this.db = {
+          const remote = {
             products: products as Product[],
             customers: customers as Customer[],
             orders: orders as Order[],
             srs: srs as SRUser[],
-            admins: admins as AdminUser[],
-            lastUpdated: target.lastUpdated || new Date().toISOString()
+            admins: admins as AdminUser[]
           };
+          const remoteOrderIds = remote.orders.map(o => o.id);
+          const remoteCustomerIds = remote.customers.map(c => c.id);
+          let mergedCount = 0;
+          if (APP_RULES.mode === 'sr' && this.hasPendingSync) {
+            const result = this.mergeUnsynced(remote);
+            this.db = { ...result.merged, lastUpdated: target.lastUpdated || new Date().toISOString() };
+            mergedCount = result.added;
+          } else {
+            this.db = { ...remote, lastUpdated: target.lastUpdated || new Date().toISOString() };
+          }
+          this.saveSyncedIds(remoteOrderIds, remoteCustomerIds);
           localStorage.setItem(DB_STORAGE_KEY, JSON.stringify(this.db));
+          this.syncCartWithProducts();
+          this.persistCart();
+          // আগের সেশনে ক্লাউডে পৌঁছানো নিশ্চিত হয়নি: একবার আবার পাঠিয়ে নিশ্চিত করা (ack এলে চিহ্ন মুছে যায়)
+          if (APP_RULES.mode === 'sr' && this.hasPendingSync && (mergedCount > 0 || !this.resyncStarted)) {
+            this.resyncStarted = true;
+            this.pushToCloud();
+          }
           if ((window as any).App && (window as any).App.render) {
             (window as any).App.render();
           }
         };
+
+        // সার্ভারের সাথে সংযোগ আছে কিনা (অফলাইন সংকেতের জন্য)
+        try {
+          this.firebaseDb.ref('.info/connected').on('value', (snap: any) => {
+            this.cloudConnected = !!snap.val();
+            this.emitNetChange();
+          });
+        } catch { /* ignore */ }
 
         // Listen on /bioherbs_agrovet
         this.firebaseDb.ref('bioherbs_agrovet').on('value', (snapshot: any) => {
@@ -666,10 +839,73 @@ export class Store {
     };
     localStorage.setItem(SESSION_AUTH_KEY, JSON.stringify(this.authSession));
     this.activeTab = role === 'admin' ? 'dashboard' : 'home';
+    // কার্ট: লগআউটে খালি, লগইনে নিজের সেভ করা কার্ট ফিরে আসে
+    this.cart = { customerId: '', items: {}, discount: 0, notes: '' };
+    if (user) this.restoreCart();
   }
 
   logout() {
     this.setAuth(null, null);
+  }
+
+  // ===== SR helpers (সফট ডিলিট + আইডি নিরাপত্তা) =====
+  /** ডিলিট না হওয়া এসআরদের তালিকা (লগইন, ড্রপডাউন, তালিকার জন্য) */
+  getActiveSrs(): SRUser[] {
+    return (this.db.srs || []).filter(s => !s.deletedAt);
+  }
+
+  /** ডিলিট করা এসআরদের তালিকা */
+  getDeletedSrs(): SRUser[] {
+    return (this.db.srs || []).filter(s => !!s.deletedAt);
+  }
+
+  /** এই আইডি কখনো ব্যবহার হয়েছে কিনা (এসআর তালিকা, অর্ডার বা কাস্টমারে) */
+  isSrIdUsed(id: string): boolean {
+    const key = (id || '').trim().toLowerCase();
+    if (!key) return false;
+    return (this.db.srs || []).some(s => (s.id || '').trim().toLowerCase() === key)
+      || (this.db.orders || []).some(o => (o.srId || '').trim().toLowerCase() === key)
+      || (this.db.customers || []).some(c =>
+          (c.assignedSrId || '').trim().toLowerCase() === key || (c.createdBy || '').trim().toLowerCase() === key);
+  }
+
+  /** পরবর্তী এসআর আইডি: এ পর্যন্ত ব্যবহৃত সর্বোচ্চ নম্বরের পরেরটা (ডিলিট করা আইডি কখনো ফেরত আসে না) */
+  getNextSrId(): string {
+    let max = 0;
+    const scan = (id?: string) => {
+      const m = /^SR(\d+)$/i.exec((id || '').trim());
+      if (m) max = Math.max(max, parseInt(m[1], 10));
+    };
+    (this.db.srs || []).forEach(s => scan(s.id));
+    (this.db.orders || []).forEach(o => scan(o.srId));
+    (this.db.customers || []).forEach(c => { scan(c.assignedSrId); scan(c.createdBy); });
+    return `SR${String(max + 1).padStart(2, '0')}`;
+  }
+
+  /**
+   * রিপোর্টের জন্য এসআর তালিকা: চালু এসআর + অর্ডার আছে এমন ডিলিট করা এসআর ("প্রাক্তন" লেবেলসহ)
+   * + অর্ডারে আছে কিন্তু তালিকায় নেই এমন পুরনো এসআর। ফলে মোট বিক্রির সাথে এসআরদের যোগফল মেলে।
+   */
+  getReportSrList(): SRUser[] {
+    const suffix = this.lang === 'bn' ? ' (প্রাক্তন)' : ' (Former)';
+    const orders = this.db.orders || [];
+    const all = this.db.srs || [];
+    const hasOrders = (id: string) => orders.some(o => o.srId === id);
+    const list: SRUser[] = all
+      .filter(s => !s.deletedAt || hasOrders(s.id))
+      .map(s => s.deletedAt ? { ...s, name: `${s.name}${suffix}` } : s);
+    const known = new Set(all.map(s => s.id));
+    const added = new Set<string>();
+    orders.forEach(o => {
+      if (o.srId && !known.has(o.srId) && !added.has(o.srId)) {
+        added.add(o.srId);
+        list.push({
+          id: o.srId, username: '', password: '', name: `${o.srName || o.srId}${suffix}`,
+          phone: '', territory: o.territory || '', target: 0, active: false, deletedAt: 'legacy'
+        });
+      }
+    });
+    return list;
   }
 
   getNextCustomerId(): string {

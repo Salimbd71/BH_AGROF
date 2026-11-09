@@ -23,7 +23,7 @@ export class ReportModule {
 
     const srs = isSR
       ? store.db.srs.filter(s => s.id === currentSrId)
-      : store.db.srs;
+      : store.getReportSrList();
 
     // 1. SR-wise aggregation (For Admin comparative view or SR target card)
     const srReportList = srs.map(sr => {
@@ -691,7 +691,7 @@ export class ReportModule {
     if (!XLSX) return;
 
     const orders = store.db.orders;
-    const rows = store.db.srs.map(sr => {
+    const rows = store.getReportSrList().map(sr => {
       const srOrders = orders.filter(o => o.srId === sr.id);
       const totalAmount = srOrders.reduce((acc, o) => acc + o.grandTotal, 0);
       const totalItems = srOrders.reduce((acc, o) => acc + o.items.reduce((s, it) => s + it.qty, 0), 0);

@@ -74,7 +74,10 @@ export class CustomerModule {
               <div class="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center gap-2 text-[11px]">
                 <span class="text-slate-400">${store.t('assignedSrRep')}:</span>
                 <select onchange="window.CustomerActions.reassignSR('${c.id}', this.value)" class="text-xs font-bold text-slate-800 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-0.5">
-                  ${store.db.srs.map(s => `
+                  ${store.getDeletedSrs().some(d => d.id === (c.assignedSrId || c.createdBy)) ? `
+                    <option value="" selected disabled>${(c.assignedSrId || c.createdBy)} (${store.lang === 'bn' ? 'প্রাক্তন এসআর, নতুন দিন' : 'former SR - reassign'})</option>
+                  ` : ''}
+                  ${store.getActiveSrs().map(s => `
                     <option value="${s.id}" ${(c.assignedSrId || c.createdBy) === s.id ? 'selected' : ''}>
                       ${s.id} - ${s.name}
                     </option>
@@ -143,7 +146,7 @@ export class CustomerModule {
               <span class="text-xs font-bold text-slate-500 whitespace-nowrap hidden sm:inline">${store.t('filterBySR')}</span>
               <select id="adminSrCustomerFilter" onchange="window.CustomerActions.filterBySr(this.value)" class="text-xs font-bold px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-100">
                 <option value="all">${store.t('allSRsOption')} (${store.db.customers.length})</option>
-                ${store.db.srs.map(s => {
+                ${store.getActiveSrs().map(s => {
                   const cnt = store.db.customers.filter(c => (c.assignedSrId || c.createdBy || '').trim().toLowerCase() === (s.id || '').trim().toLowerCase()).length;
                   return `<option value="${s.id}">${s.id} - ${s.name} (${cnt})</option>`;
                 }).join('')}
@@ -329,7 +332,7 @@ export class CustomerModule {
               <div>
                 <label class="block font-bold text-slate-700 dark:text-slate-300 mb-1">${store.t('assignedSrRep')} *</label>
                 <select id="custAssignedSr" class="w-full px-3 py-2 rounded-xl border border-purple-200 dark:border-purple-800 bg-purple-50/50 dark:bg-slate-800 font-bold text-purple-900 dark:text-purple-300">
-                  ${store.db.srs.map(s => `
+                  ${store.getActiveSrs().map(s => `
                     <option value="${s.id}">${s.id} - ${s.name} (${s.territory})</option>
                   `).join('')}
                 </select>
@@ -438,7 +441,7 @@ export class CustomerModule {
                   <div class="mt-2 flex items-center gap-2 text-xs">
                     <span class="font-bold text-slate-500">${store.t('assignedSrRep')}</span>
                     <select id="approveAssignSr-${c.id}" class="px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-bold text-slate-800 dark:text-slate-200 text-xs">
-                      ${store.db.srs.map(s => `
+                      ${store.getActiveSrs().map(s => `
                         <option value="${s.id}" ${(c.assignedSrId || c.createdBy) === s.id ? 'selected' : ''}>
                           ${s.id} - ${s.name}
                         </option>

@@ -1,34 +1,21 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import {defineConfig, type Plugin} from 'vite';
+import {defineConfig} from 'vite';
+import {pwaPlugin} from './scripts/pwa-plugin.ts';
 
 /**
  * দুটো আলাদা সাইট একই কোড থেকে বিল্ড হয়:
  *   npm run build:sr     -> dist/sr     (এসআর/ইউজার সাইট)
  *   npm run build:admin  -> dist/admin  (অ্যাডমিন সাইট)
  * mode-এর নাম (sr / admin) দিয়েই কোড বুঝে নেয় কোন সাইট বিল্ড হচ্ছে।
+ * PWA (manifest + অফলাইন service worker) পাশাপাশি বিল্ড হয়: scripts/pwa-plugin.ts
  */
-function perSiteHtml(mode: string): Plugin {
-  return {
-    name: 'per-site-html',
-    transformIndexHtml(html) {
-      const isAdmin = mode === 'admin';
-      const title = isAdmin ? 'BH Agro Ltd. - Admin Panel' : 'BH Agro Ltd. - SR Portal';
-      let out = html.replace(/<title>[\s\S]*?<\/title>/, `<title>${title}</title>`);
-      if (isAdmin) {
-        // অ্যাডমিন সাইট সার্চ ইঞ্জিনে আসবে না
-        out = out.replace('<head>', '<head>\n  <meta name="robots" content="noindex, nofollow" />');
-      }
-      return out;
-    }
-  };
-}
-
 export default defineConfig(({mode}) => {
   const site = mode === 'admin' ? 'admin' : 'sr';
   return {
-    plugins: [react(), tailwindcss(), perSiteHtml(site)],
+    base: './',
+    plugins: [react(), tailwindcss(), pwaPlugin(site)],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

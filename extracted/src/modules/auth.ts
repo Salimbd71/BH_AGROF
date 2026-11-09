@@ -11,7 +11,7 @@ export class AuthModule {
   renderLoginScreen(): string {
     const isBN = store.lang === 'bn';
     const hasAdmins = (store.db.admins || []).length > 0;
-    const hasSrs = (store.db.srs || []).length > 0;
+    const hasSrs = store.getActiveSrs().length > 0;
 
     return `
       <div class="min-h-screen bg-gradient-to-br from-brand-950 via-slate-900 to-tealbrand-950 flex flex-col justify-center items-center p-4">
@@ -72,7 +72,6 @@ export class AuthModule {
           </div>
           ` : ''}
 
-          <!-- Admin Login Form -->
           ${APP_RULES.allowedRoles.includes('admin') ? `
           <div id="adminLoginFormSection" class="${APP_RULES.allowedRoles.includes('sr') ? 'hidden' : ''}">
             <form onsubmit="event.preventDefault(); window.AuthActions.submitAdmin();" class="space-y-4 text-xs">
@@ -162,7 +161,8 @@ export class AuthModule {
   }
 
   renderSRManagementSection(): string {
-    const srs = store.db.srs || [];
+    const srs = store.getActiveSrs();
+    const formerSrs = store.getDeletedSrs();
     const admins = store.db.admins || [];
     const isBN = store.lang === 'bn';
 
@@ -343,6 +343,31 @@ export class AuthModule {
             `;
           }).join('')}
         </div>
+
+        ${formerSrs.length > 0 ? `
+        <div class="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+          <h3 class="font-extrabold text-sm text-slate-700 dark:text-slate-200 mb-1">
+            ${isBN ? 'প্রাক্তন এসআর' : 'Former SRs'} (${formerSrs.length})
+          </h3>
+          <p class="text-[11px] text-slate-500 mb-3">
+            ${isBN ? 'এরা লগইন করতে পারে না। তাদের অর্ডার ও বিক্রির তথ্য রিপোর্টে থাকে।' : 'They cannot log in. Their orders and sales stay in reports.'}
+          </p>
+          <div class="space-y-2">
+            ${formerSrs.map(sr => `
+              <div class="flex items-center justify-between gap-3 p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs">
+                <div class="min-w-0">
+                  <span class="font-mono font-black text-slate-500">${sr.id}</span>
+                  <span class="font-bold text-slate-800 dark:text-slate-100 ml-2">${sr.name}</span>
+                  <span class="text-slate-400 ml-2">${sr.deletedAt ? new Date(sr.deletedAt).toLocaleDateString() : ''}</span>
+                </div>
+                <button onclick="window.AuthActions.restoreSR('${sr.id}')" class="px-3 py-1.5 rounded-lg border border-brand-300 text-brand-700 dark:text-brand-300 font-bold hover:bg-brand-50 dark:hover:bg-brand-950">
+                  ${isBN ? 'আবার চালু করুন' : 'Restore'}
+                </button>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+        ` : ''}
       </div>
     `;
   }
@@ -403,7 +428,7 @@ export class AuthModule {
   }
 
   openAddSRModal(onSaved: () => void) {
-    const nextId = `SR${String(store.db.srs.length + 1).padStart(2, '0')}`;
+    const nextId = store.getNextSrId();
     const modalHtml = `
       <div id="srModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
         <div class="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800">
@@ -471,6 +496,15 @@ export class AuthModule {
         const phone = (document.getElementById('newSrPhone') as HTMLInputElement).value.trim();
         const territory = (document.getElementById('newSrTerritory') as HTMLInputElement).value.trim();
         const target = Number((document.getElementById('newSrTarget') as HTMLInputElement).value) || 300000;
+
+        if (store.isSrIdUsed(srId)) {
+          showToast('This SR ID was already used (or belongs to a deleted SR). Use a new ID.', 'error');
+          return;
+        }
+        if (store.getActiveSrs().some(x => x.username === username)) {
+          showToast('This username is already taken by another SR!', 'error');
+          return;
+        }
 
         const newSr: SRUser = {
           id: srId,

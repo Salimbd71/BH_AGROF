@@ -10,47 +10,26 @@ export class ProductModule {
   renderProductCard(p: Product): string {
     const isLow = p.stock > 0 && p.stock < 10;
     const isOut = p.stock <= 0;
+    const isBn = store.lang === 'bn';
 
+    // তালিকা (list) আকারে একটি সারি: বামে তথ্য, ডানে বুক বাটন
     return `
-      <div class="product-item-card p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between hover:border-brand-500/40 transition" data-name="${(p.name || '').toLowerCase()} ${(p.bnName || '').toLowerCase()}" data-sku="${(p.sku || '').toLowerCase()}" data-cat="${p.category}" data-stock="${p.stock}">
-        <div>
-          <div class="flex items-start justify-between gap-2 mb-2">
-            <span class="text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase ${
-              p.category === 'antibiotics' ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300' :
-              (p.category === 'vaccines' ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300' :
-              (p.category === 'supplements' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300'))
-            }">
-              ${store.t(p.category) || p.category}
+      <div class="product-item-card flex items-center gap-3 p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:border-brand-500/40 transition" data-name="${(p.name || '').toLowerCase()} ${(p.bnName || '').toLowerCase()}" data-sku="${(p.sku || '').toLowerCase()}" data-cat="${p.category}" data-stock="${p.stock}">
+        <div class="min-w-0 flex-1">
+          <h4 class="font-extrabold text-sm text-slate-900 dark:text-white leading-tight">${isBn ? (p.bnName || p.name) : p.name}</h4>
+          <p class="text-[11px] text-slate-500 mt-0.5">${p.packSize} • <span class="font-mono">${p.sku}</span> • ${store.t(p.category) || p.category}</p>
+          <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
+            <span class="text-sm font-black text-brand-700 dark:text-brand-400">৳${p.tradePrice}</span>
+            <span class="text-slate-400 line-through">MRP ৳${p.mrp}</span>
+            ${p.tradeOffer ? `<span class="font-bold text-tealbrand-700 dark:text-tealbrand-400">${p.tradeOffer}</span>` : ''}
+            <span class="font-bold ${isOut ? 'text-rose-600' : (isLow ? 'text-amber-600' : 'text-slate-500')}">
+              ${isOut ? (isBn ? 'স্টক শেষ' : 'Out of Stock') : (isLow ? (isBn ? `স্বল্প স্টক: ${p.stock}` : `Low Stock: ${p.stock}`) : (isBn ? `মজুদ: ${p.stock}` : `Stock: ${p.stock}`))}
             </span>
-            <span class="text-[10px] font-bold ${isOut ? 'text-rose-600' : (isLow ? 'text-amber-600 font-extrabold animate-pulse' : 'text-slate-500')}">
-              ${isOut ? (store.lang === 'bn' ? 'স্টক শেষ' : 'Out of Stock') : (isLow ? (store.lang === 'bn' ? `স্বল্প স্টক: ${p.stock}` : `Low Stock: ${p.stock}`) : (store.lang === 'bn' ? `মজুদ: ${p.stock}` : `Stock: ${p.stock}`))}
-            </span>
-          </div>
-
-          <h4 class="font-extrabold text-sm text-slate-900 dark:text-white leading-tight">
-            ${store.lang === 'bn' ? (p.bnName || p.name) : p.name}
-          </h4>
-          <p class="text-xs text-slate-500 mt-0.5">${p.packSize} • <span class="font-mono text-[11px]">${p.sku}</span></p>
-
-          ${p.tradeOffer ? `
-            <div class="mt-2 text-[11px] font-bold text-tealbrand-700 dark:text-tealbrand-400 flex items-center gap-1">
-              <i data-lucide="tag" class="w-3 h-3"></i>
-              <span>${p.tradeOffer}</span>
-            </div>
-          ` : ''}
-
-          <div class="mt-3 flex items-baseline gap-2">
-            <span class="text-base font-black text-brand-700 dark:text-brand-400">৳${p.tradePrice}</span>
-            <span class="text-xs text-slate-400 line-through">MRP ৳${p.mrp}</span>
-            <span class="text-[10px] text-slate-400">/ ${store.lang === 'bn' ? 'টিপি' : 'TP'}</span>
           </div>
         </div>
-
-        <div class="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
-          ${isOut ? `
-            <div class="text-center py-1.5 text-xs font-bold text-rose-500 bg-rose-50 dark:bg-rose-950/40 rounded-xl">${store.lang === 'bn' ? 'স্টক শেষ' : 'Out of Stock'}</div>
-          ` : `
-            <button onclick="window.ProductActions.quickOrder('${p.id}')" class="w-full py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm active:scale-95">
+        <div class="shrink-0">
+          ${isOut ? '' : `
+            <button onclick="window.ProductActions.quickOrder('${p.id}')" class="px-3 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1 active:scale-95">
               <i data-lucide="plus" class="w-3.5 h-3.5"></i>
               <span>${store.t('bookProduct')}</span>
             </button>
@@ -106,7 +85,7 @@ export class ProductModule {
           Showing ${products.length} veterinary medicines
         </div>
 
-        <div id="productListGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div id="productListGrid" class="grid grid-cols-1 xl:grid-cols-2 gap-2">
           ${products.map(p => this.renderProductCard(p)).join('')}
         </div>
       </div>

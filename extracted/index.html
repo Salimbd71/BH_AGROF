@@ -2,7 +2,7 @@
 <html lang="en" class="light">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>BH Agro Ltd. - Animal Health ERP & SR Management</title>
   <meta name="description" content="Comprehensive Animal Health Products ERP, SR Order Booking, Inventory & Sales Analytics for BH Agro Ltd." />
   <meta property="og:title" content="BH Agro Ltd. - Animal Health ERP" />
@@ -80,6 +80,42 @@
     ::-webkit-scrollbar-thumb:hover {
       background: rgba(16, 185, 129, 0.6);
     }
+
+    /* ===== Mobile / Desktop / PWA friendly base ===== */
+    html {
+      -webkit-text-size-adjust: 100%;
+      overscroll-behavior-y: contain; /* অ্যাপ মোডে আকস্মিক pull-to-refresh বন্ধ */
+    }
+    body {
+      min-height: 100vh;
+      min-height: 100dvh;
+      -webkit-tap-highlight-color: transparent;
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+    button, a, select, label, [onclick] { touch-action: manipulation; } /* ডাবল-ট্যাপ জুম/দেরি বন্ধ */
+    :focus-visible { outline: 2px solid #10b981; outline-offset: 2px; } /* কীবোর্ড ব্যবহারকারীর জন্য (ডেস্কটপ) */
+    input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offset: 0; }
+
+    /* ছোট স্ক্রিনে ইনপুট ১৬px: iPhone-এ ফোকাস করলে পেজ জুম হয় না */
+    @media (max-width: 1023px) {
+      input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]),
+      select, textarea { font-size: 16px !important; }
+      #toastContainer {
+        bottom: calc(5.5rem + env(safe-area-inset-bottom)) !important;
+        left: 0.75rem !important; right: 0.75rem !important; max-width: none !important;
+      }
+    }
+
+    /* মোডাল ছোট স্ক্রিনে কেটে না গিয়ে ভেতরে স্ক্রল করবে */
+    #srModal > div, #adminCreateModal > div, #customerAddModal > div, #productAddModal > div,
+    #lowStockModal > div, #appConfirmModal > div, #firebaseModal > div {
+      max-height: calc(100vh - 2rem);
+      max-height: calc(100dvh - 2rem);
+      overflow-y: auto;
+    }
+
+    /* ছাপার সময় নেটওয়ার্ক ব্যানার লুকানো */
+    @media print { #netBanner { display: none !important; } }
     .print-only {
       display: none;
     }
@@ -104,6 +140,9 @@
   </style>
 </head>
 <body class="bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 min-h-screen font-sans antialiased selection:bg-brand-500 selection:text-white transition-colors duration-200">
+
+  <!-- অফলাইন / সিঙ্ক / আপডেট / ইনস্টল ব্যানার (pwa.ts) -->
+  <div id="netBanner"></div>
 
   <!-- Veterinary ERP Loading Splash Screen -->
   <div id="appSplashScreen" class="fixed inset-0 z-[9999] flex flex-col items-center justify-between p-6 bg-gradient-to-b from-emerald-50 via-white to-slate-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 transition-all duration-700 ease-out select-none">

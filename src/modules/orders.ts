@@ -9,6 +9,7 @@ import { store, Order, OrderItem } from './store.ts';
 export class OrderModule {
   renderOrderBooking(onOrderPlaced: (id: string) => void): string {
     const isAdmin = store.authSession.role === 'admin';
+    if (!isAdmin) return this.renderSrOrderBooking();
     const currentSrId = store.authSession.user?.id;
     const isBn = store.lang === 'bn';
 
@@ -121,7 +122,7 @@ export class OrderModule {
 
               <div class="relative">
                 <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-3"></i>
-                <input type="text" value="${store.catalogSearch}" oninput="window.OrderActions.setSearch(this.value)" placeholder="${store.t('searchPlaceholder')}" class="w-full pl-9 pr-4 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 focus:bg-white dark:focus:bg-slate-900 focus:ring-2 focus:ring-brand-500 transition" />
+                <input type="text" id="orderSearchInput" autocomplete="off" value="${store.catalogSearch}" oninput="window.OrderActions.setSearch(this.value)" placeholder="${store.t('searchPlaceholder')}" class="w-full pl-9 pr-4 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 focus:bg-white dark:focus:bg-slate-900 focus:ring-2 focus:ring-brand-500 transition" />
               </div>
             </div>
 
@@ -234,11 +235,11 @@ export class OrderModule {
                 <div class="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2">
                   <div>
                     <label class="block text-[11px] font-bold text-slate-500 mb-1">${store.t('discount')}</label>
-                    <input type="number" min="0" value="${store.cart.discount}" oninput="window.OrderActions.setDiscount(this.value)" class="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800" placeholder="0" />
+                    <input type="number" id="orderDiscountInput" min="0" value="${store.cart.discount}" oninput="window.OrderActions.setDiscount(this.value)" class="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800" placeholder="0" />
                   </div>
                   <div>
                     <label class="block text-[11px] font-bold text-slate-500 mb-1">${isBn ? 'মন্তব্য বা ডেলিভারি নোট' : 'Remarks / Delivery Note'}</label>
-                    <input type="text" value="${store.cart.notes || ''}" oninput="window.OrderActions.setNotes(this.value)" class="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800" placeholder="${isBn ? 'যেমন: সকালের মধ্যে ডেলিভারি দিন' : 'e.g. Urgent morning delivery'}" />
+                    <input type="text" id="orderNotesInput" value="${store.cart.notes || ''}" oninput="window.OrderActions.setNotes(this.value)" class="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800" placeholder="${isBn ? 'যেমন: সকালের মধ্যে ডেলিভারি দিন' : 'e.g. Urgent morning delivery'}" />
                   </div>
                 </div>
 
@@ -282,7 +283,394 @@ export class OrderModule {
     `;
   }
 
+
+  // ================= SR layout: Order Slip on top, product list below =================
+  getSrCustomers() {
+    const currentSrId = store.authSession.user?.id;
+    const list = store.db.customers.filter(c => c.status === 'approved' && (c.assignedSrId || c.createdBy) === currentSrId);
+    if (list.length > 0 && !list.some(c => c.id === store.cart.customerId)) {
+      store.cart.customerId = list[0].id;
+    } else if (list.length === 0) {
+      store.cart.customerId = '';
+    }
+    return list;
+  }
+
+  getFilteredProducts() {
+    const q = (store.catalogSearch || '').toLowerCase();
+    return store.db.products.filter(p => {
+      const matchCat = store.catalogCategory === 'all' || p.category === store.catalogCategory;
+      const matchSearch = !q ||
+        (p.name || '').toLowerCase().includes(q) ||
+        (p.bnName || '').toLowerCase().includes(q) ||
+        (p.sku || '').toLowerCase().includes(q);
+      return matchCat && matchSearch;
+    });
+  }
+
+  renderCatalogRows(): string {
+    const isBn = store.lang === 'bn';
+    const products = this.getFilteredProducts();
+    if (products.length === 0) {
+      return `<div class="text-center py-10 text-xs text-slate-400">${isBn ? 'কোনো প্রোডাক্ট পাওয়া যায়নি' : 'No products found'}</div>`;
+    }
+    return products.map(p => {
+      const cartItem = store.cart.items[p.id];
+      const qty = cartItem ? cartItem.qty : 0;
+      const isOut = p.stock <= 0;
+      const isLow = p.stock > 0 && p.stock < 10;
+      return `
+        <div class="flex items-center gap-3 p-3 rounded-2xl bg-white dark:bg-slate-900 border ${qty > 0 ? 'border-brand-500 ring-2 ring-brand-500/20' : 'border-slate-200 dark:border-slate-800'} shadow-sm">
+          <div class="min-w-0 flex-1">
+            <h4 class="font-extrabold text-sm text-slate-900 dark:text-white leading-tight">${isBn ? (p.bnName || p.name) : p.name}</h4>
+            <p class="text-[11px] text-slate-500 mt-0.5">${p.packSize} • <span class="font-mono">${p.sku}</span></p>
+            <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
+              <span class="text-sm font-black text-brand-700 dark:text-brand-400">৳${p.tradePrice}</span>
+              <span class="text-slate-400 line-through">MRP ৳${p.mrp}</span>
+              ${p.tradeOffer ? `<span class="font-bold text-tealbrand-700 dark:text-tealbrand-400">${p.tradeOffer}</span>` : ''}
+              <span class="font-bold ${isOut ? 'text-rose-600' : (isLow ? 'text-amber-600' : 'text-slate-500')}">
+                ${isOut ? (isBn ? 'স্টক শেষ' : 'Out of Stock') : (isLow ? (isBn ? `স্বল্প: ${p.stock}` : `Low: ${p.stock}`) : (isBn ? `মজুদ: ${p.stock}` : `Stock: ${p.stock}`))}
+              </span>
+            </div>
+          </div>
+          <div class="shrink-0">
+            ${isOut ? '' : (qty === 0 ? `
+              <button onclick="window.OrderActions.updateQty('${p.id}', 1)" class="px-3 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-xs font-bold flex items-center gap-1 active:scale-95 transition">
+                <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+                <span>${store.t('bookProduct')}</span>
+              </button>
+            ` : `
+              <div class="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 rounded-xl p-1">
+                <button onclick="window.OrderActions.updateQty('${p.id}', ${qty - 1})" class="w-8 h-8 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white flex items-center justify-center">
+                  <i data-lucide="${qty === 1 ? 'trash-2' : 'minus'}" class="w-3.5 h-3.5"></i>
+                </button>
+                <span class="text-xs font-black min-w-[22px] text-center">${qty}</span>
+                <button onclick="window.OrderActions.updateQty('${p.id}', ${qty + 1})" class="w-8 h-8 rounded-lg bg-brand-600 text-white flex items-center justify-center">
+                  <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+                </button>
+              </div>
+            `)}
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  renderSlipItems(): string {
+    const isBn = store.lang === 'bn';
+    const keys = Object.keys(store.cart.items);
+    if (keys.length === 0) {
+      return `
+        <div class="text-center py-5 text-slate-400">
+          <i data-lucide="shopping-bag" class="w-8 h-8 mx-auto mb-1 opacity-30"></i>
+          <p class="text-xs font-medium">${store.t('emptyCart')}</p>
+        </div>
+      `;
+    }
+    return `
+      <div class="space-y-2 max-h-[280px] overflow-y-auto pr-1">
+        ${keys.map(k => {
+          const it = store.cart.items[k];
+          return `
+            <div class="flex items-center gap-2 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 text-xs">
+              <div class="min-w-0 flex-1">
+                <div class="font-bold text-slate-800 dark:text-slate-100 truncate">${isBn ? (it.product.bnName || it.product.name) : it.product.name}</div>
+                <div class="text-[11px] text-slate-500">
+                  ${it.qty} × ৳${it.product.tradePrice}
+                  ${it.freeQty > 0 ? `<span class="text-tealbrand-600 font-bold"> +${it.freeQty} ${isBn ? 'ফ্রি' : 'Free'}</span>` : ''}
+                </div>
+              </div>
+              <div class="font-black text-slate-800 dark:text-slate-100">৳${it.total.toLocaleString()}</div>
+              <div class="flex items-center gap-1">
+                <button onclick="window.OrderActions.updateQty('${it.product.id}', ${it.qty - 1})" class="w-7 h-7 rounded-lg bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 flex items-center justify-center">
+                  <i data-lucide="${it.qty === 1 ? 'trash-2' : 'minus'}" class="w-3 h-3"></i>
+                </button>
+                <button onclick="window.OrderActions.updateQty('${it.product.id}', ${it.qty + 1})" class="w-7 h-7 rounded-lg bg-brand-600 text-white flex items-center justify-center">
+                  <i data-lucide="plus" class="w-3 h-3"></i>
+                </button>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  }
+
+  renderSlipTotals(): string {
+    const isBn = store.lang === 'bn';
+    const keys = Object.keys(store.cart.items);
+    if (keys.length === 0) return '';
+    let subtotal = 0;
+    let totalFree = 0;
+    keys.forEach(k => {
+      subtotal += store.cart.items[k].total;
+      totalFree += store.cart.items[k].freeQty || 0;
+    });
+    const discount = Number(store.cart.discount) || 0;
+    const grandTotal = Math.max(0, subtotal - discount);
+    return `
+      <div class="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-1.5 text-xs">
+        <div class="flex justify-between text-slate-500">
+          <span>${store.t('subtotal')}</span>
+          <span>৳${subtotal.toLocaleString()}</span>
+        </div>
+        ${totalFree > 0 ? `
+          <div class="flex justify-between text-tealbrand-600 font-bold">
+            <span>${store.t('freeQty')}</span>
+            <span>${totalFree} ${isBn ? 'টি ফ্রি' : 'units free'}</span>
+          </div>
+        ` : ''}
+        ${discount > 0 ? `
+          <div class="flex justify-between text-rose-500 font-bold">
+            <span>${store.t('discount')}</span>
+            <span>-৳${discount.toLocaleString()}</span>
+          </div>
+        ` : ''}
+        <div class="flex justify-between text-slate-500">
+          <span>${store.t('vat')}</span>
+          <span>${isBn ? '৳০ (অব্যাহতি)' : '৳0 (Exempt)'}</span>
+        </div>
+        <div class="flex justify-between text-sm sm:text-base font-black text-slate-900 dark:text-white pt-2 border-t border-slate-200 dark:border-slate-700">
+          <span>${store.t('grandTotal')}</span>
+          <span class="text-brand-600">৳${grandTotal.toLocaleString()}</span>
+        </div>
+      </div>
+      <button onclick="window.OrderActions.submitOrder()" class="w-full py-3 bg-gradient-to-r from-brand-600 to-tealbrand-600 hover:from-brand-500 hover:to-tealbrand-500 text-white rounded-2xl font-black text-sm flex items-center justify-center gap-2 shadow-md active:scale-95 transition">
+        <i data-lucide="check-circle" class="w-4 h-4"></i>
+        <span>${store.t('submitOrder')}</span>
+      </button>
+    `;
+  }
+
+  renderSrOrderBooking(): string {
+    const isBn = store.lang === 'bn';
+    const customers = this.getSrCustomers();
+    const selected = customers.find(c => c.id === store.cart.customerId);
+    const hasItems = Object.keys(store.cart.items).length > 0;
+    const categories = [
+      { id: 'all', label: store.t('categoryAll') },
+      { id: 'antibiotics', label: store.t('categoryAntibiotics') },
+      { id: 'vaccines', label: store.t('categoryVaccines') },
+      { id: 'supplements', label: store.t('categorySupplements') },
+      { id: 'dewormers', label: store.t('categoryDewormers') },
+    ];
+
+    return `
+      <div class="space-y-4">
+        <div>
+          <h2 class="text-xl sm:text-2xl font-black text-slate-900 dark:text-white flex items-center gap-2">
+            <i data-lucide="shopping-cart" class="w-6 h-6 text-brand-600"></i>
+            <span>${store.t('orderBooking')}</span>
+          </h2>
+          <p class="text-xs text-slate-500">
+            ${isBn ? `শুধু আপনার অ্যাসাইন করা কাস্টমারদের জন্য অর্ডার বুক করা যাবে (${store.authSession.user?.name})` : `Booking allowed only for customers assigned to you (${store.authSession.user?.name})`}
+          </p>
+        </div>
+
+        ${customers.length === 0 ? `
+          <div class="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 text-xs font-bold border border-amber-200">
+            ${isBn ? 'এখনো কোনো অনুমোদিত কাস্টমার আপনার অ্যাসাইন করা নেই' : 'No approved customers assigned to your SR account yet.'}
+          </div>
+        ` : `
+          <div class="lg:grid lg:grid-cols-12 lg:gap-6 lg:items-start space-y-4 lg:space-y-0">
+          <div class="lg:col-span-5 xl:col-span-4 lg:order-2 lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto lg:rounded-3xl">
+          <!-- ORDER SLIP (top on mobile, right column on desktop) -->
+          <div id="orderSlip" class="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-md p-4 space-y-3">
+            <div class="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+              <div class="flex items-center gap-2">
+                <i data-lucide="receipt" class="w-5 h-5 text-brand-600"></i>
+                <h3 class="font-extrabold text-sm sm:text-base">${store.t('cartTitle')}</h3>
+              </div>
+              <button id="orderSlipClear" onclick="window.OrderActions.clearCart()" class="${hasItems ? '' : 'hidden'} text-xs text-rose-500 hover:underline">${isBn ? 'মুছুন' : 'Clear'}</button>
+            </div>
+
+            <!-- Customer inside slip: tap to change -->
+            <label class="relative block">
+              <div class="flex items-center justify-between gap-3 p-3 rounded-2xl bg-brand-50 dark:bg-brand-950/40 border border-brand-200 dark:border-brand-900/60">
+                <div class="min-w-0">
+                  <div class="text-[10px] font-bold uppercase text-brand-700 dark:text-brand-300">${isBn ? 'কাস্টমার (বদলাতে ট্যাপ করুন)' : 'Customer (tap to change)'}</div>
+                  <div class="font-black text-sm text-slate-900 dark:text-white truncate">
+                    ${selected ? `<span class="font-mono text-brand-800 dark:text-brand-300">${selected.id}</span> ${selected.shopName}` : `-- ${store.t('selectCustomer')} --`}
+                  </div>
+                  ${selected ? `
+                    <div class="text-[11px] text-slate-500 truncate">
+                      ${selected.address} • ${selected.phone} • ${store.t('creditLimit')}: ৳${(selected.creditLimit || 0).toLocaleString()}
+                    </div>
+                  ` : ''}
+                </div>
+                <i data-lucide="chevrons-up-down" class="w-5 h-5 text-brand-600 shrink-0"></i>
+              </div>
+              <select id="bookingCustomerSelect" onchange="window.OrderActions.setCustomer(this.value)" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer text-base">
+                <option value="">-- ${store.t('selectCustomer')} --</option>
+                ${customers.map(c => `
+                  <option value="${c.id}" ${store.cart.customerId === c.id ? 'selected' : ''}>${c.id} ${c.shopName} (${c.address})</option>
+                `).join('')}
+              </select>
+            </label>
+
+            <div id="orderSlipItems">${this.renderSlipItems()}</div>
+
+            <div id="orderSlipInputs" class="${hasItems ? '' : 'hidden'} space-y-2">
+              <div>
+                <label class="block text-[11px] font-bold text-slate-500 mb-1">${store.t('discount')}</label>
+                <input type="number" inputmode="numeric" min="0" id="orderDiscountInput" value="${store.cart.discount || ''}" placeholder="0" oninput="window.OrderActions.setDiscount(this.value)" class="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 focus:outline-none focus:ring-2 focus:ring-brand-500" />
+              </div>
+              <div>
+                <label class="block text-[11px] font-bold text-slate-500 mb-1">${isBn ? 'মন্তব্য / ডেলিভারি নোট' : 'Remarks / Delivery Note'}</label>
+                <input type="text" id="orderNotesInput" value="${store.cart.notes || ''}" oninput="window.OrderActions.setNotes(this.value)" class="w-full px-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 focus:outline-none focus:ring-2 focus:ring-brand-500" />
+              </div>
+            </div>
+
+            <div id="orderSlipTotals" class="space-y-3">${this.renderSlipTotals()}</div>
+          </div>
+
+          </div>
+          <div class="lg:col-span-7 xl:col-span-8 lg:order-1 space-y-4">
+          <!-- PRODUCT LIST (below on mobile, left column on desktop) -->
+          <div class="p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
+            <div class="flex items-center gap-2 overflow-x-auto pb-1">
+              ${categories.map(cat => `
+                <button onclick="window.OrderActions.setCategory('${cat.id}')" class="px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                  store.catalogCategory === cat.id ? 'bg-brand-600 text-white shadow-sm' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+                }">${cat.label}</button>
+              `).join('')}
+            </div>
+            <div class="relative">
+              <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-3"></i>
+              <input type="text" id="orderSearchInput" autocomplete="off" value="${store.catalogSearch}" oninput="window.OrderActions.setSearch(this.value)" placeholder="${store.t('searchPlaceholder')}" class="w-full pl-9 pr-3 py-2.5 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 focus:outline-none focus:ring-2 focus:ring-brand-500" />
+            </div>
+          </div>
+
+          <div id="orderCatalogList" class="flex flex-col gap-2">${this.renderCatalogRows()}</div>
+          <div class="h-20 lg:hidden"></div>
+          </div>
+          </div>
+
+          <!-- Floating order bar (mobile): slip দেখা না গেলে নিচে মোট হিসাব -->
+          <div id="orderFloatBar" class="${hasItems ? '' : 'hidden'} lg:hidden fixed inset-x-0 bottom-0 z-40 px-3 pointer-events-none" style="padding-bottom: calc(0.75rem + env(safe-area-inset-bottom));">
+            <button onclick="window.OrderActions.scrollToSlip()" class="pointer-events-auto w-full flex items-center justify-between gap-3 px-4 py-3 rounded-2xl bg-gradient-to-r from-brand-600 to-tealbrand-600 text-white shadow-xl active:scale-[0.99] transition">
+              <span id="orderFloatCount" class="text-xs font-bold">${this.floatCountText()}</span>
+              <span id="orderFloatTotal" class="text-base font-black">৳${this.getCartTotals().grand.toLocaleString()}</span>
+              <span class="text-xs font-bold">${isBn ? 'স্লিপ দেখুন ↑' : 'View slip ↑'}</span>
+            </button>
+          </div>
+        `}
+      </div>
+    `;
+  }
+
+
+  // ---- cart totals & floating bar ----
+  getCartTotals() {
+    const keys = Object.keys(store.cart.items);
+    let subtotal = 0;
+    let free = 0;
+    keys.forEach(k => { subtotal += store.cart.items[k].total; free += store.cart.items[k].freeQty || 0; });
+    const discount = Number(store.cart.discount) || 0;
+    return { count: keys.length, subtotal, free, discount, grand: Math.max(0, subtotal - discount) };
+  }
+
+  floatCountText(): string {
+    const n = this.getCartTotals().count;
+    return store.lang === 'bn' ? `${n}টি আইটেম` : `${n} item${n === 1 ? '' : 's'}`;
+  }
+
+  private slipInView = true;
+  private floatObserver: IntersectionObserver | null = null;
+  isSubmitting = false;
+
+  updateFloatBar() {
+    const bar = document.getElementById('orderFloatBar');
+    if (!bar) return;
+    const t = this.getCartTotals();
+    const countEl = document.getElementById('orderFloatCount');
+    const totalEl = document.getElementById('orderFloatTotal');
+    if (countEl) countEl.textContent = this.floatCountText();
+    if (totalEl) totalEl.textContent = `৳${t.grand.toLocaleString()}`;
+    bar.classList.toggle('hidden', !(t.count > 0 && !this.slipInView));
+  }
+
+  /** পেজ আঁকার পর: স্লিপ স্ক্রিনে আছে কিনা দেখে ভাসমান বার দেখায়/লুকায় */
+  attachOrderUi() {
+    if (this.floatObserver) { this.floatObserver.disconnect(); this.floatObserver = null; }
+    const slip = document.getElementById('orderSlip');
+    if (!slip) return;
+    if (typeof IntersectionObserver === 'undefined') {
+      this.slipInView = false;
+      this.updateFloatBar();
+      return;
+    }
+    this.slipInView = true;
+    this.floatObserver = new IntersectionObserver(entries => {
+      entries.forEach(e => { this.slipInView = e.isIntersecting; });
+      this.updateFloatBar();
+    }, { threshold: [0, 0.05] });
+    this.floatObserver.observe(slip);
+  }
+
+  scrollToSlip() {
+    const slip = document.getElementById('orderSlip');
+    if (slip && typeof slip.scrollIntoView === 'function') slip.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  // ---- partial refresh helpers: input box কখনো নতুন করে আঁকা হয় না, তাই কীবোর্ড বন্ধ হয় না ----
+  private refreshIcons() {
+    (window as any).App?.refreshIcons?.();
+  }
+
+  /** শুধু প্রোডাক্ট লিস্ট আপডেট (সার্চ করার সময়) */
+  refreshCatalogOnly(): boolean {
+    const list = document.getElementById('orderCatalogList');
+    if (!list) return false;
+    list.innerHTML = this.renderCatalogRows();
+    this.refreshIcons();
+    return true;
+  }
+
+  /** শুধু মোট হিসাব আপডেট (ডিসকাউন্ট লেখার সময়) */
+  refreshTotalsOnly(): boolean {
+    const totals = document.getElementById('orderSlipTotals');
+    if (!totals) return false;
+    totals.innerHTML = this.renderSlipTotals();
+    this.updateFloatBar();
+    this.refreshIcons();
+    return true;
+  }
+
+  /** অর্ডার স্লিপ + প্রোডাক্ট লিস্ট আপডেট (পরিমাণ বদলালে); ইনপুট বক্স অক্ষত থাকে */
+  refreshOrderPartial(): boolean {
+    const items = document.getElementById('orderSlipItems');
+    const totals = document.getElementById('orderSlipTotals');
+    const list = document.getElementById('orderCatalogList');
+    if (!items || !totals || !list) return false;
+    const has = Object.keys(store.cart.items).length > 0;
+    items.innerHTML = this.renderSlipItems();
+    totals.innerHTML = this.renderSlipTotals();
+    list.innerHTML = this.renderCatalogRows();
+    document.getElementById('orderSlipInputs')?.classList.toggle('hidden', !has);
+    document.getElementById('orderSlipClear')?.classList.toggle('hidden', !has);
+    if (!has) {
+      const d = document.getElementById('orderDiscountInput') as HTMLInputElement | null;
+      const n = document.getElementById('orderNotesInput') as HTMLInputElement | null;
+      if (d) d.value = store.cart.discount ? String(store.cart.discount) : '';
+      if (n) n.value = store.cart.notes || '';
+    }
+    this.updateFloatBar();
+    this.refreshIcons();
+    return true;
+  }
+
   submitOrder(onOrderPlaced: (id: string) => void, showToast: (msg: string, type?: string) => void) {
+    if (this.isSubmitting) return; // ডাবল-ট্যাপে একই অর্ডার দুইবার যাবে না
+    this.isSubmitting = true;
+    try {
+      this.submitOrderInner(onOrderPlaced, showToast);
+    } finally {
+      this.isSubmitting = false;
+    }
+  }
+
+  private submitOrderInner(onOrderPlaced: (id: string) => void, showToast: (msg: string, type?: string) => void) {
     const isBn = store.lang === 'bn';
     if (!store.cart.customerId) {
       showToast(isBn ? 'অনুগ্রহ করে প্রথমে একজন গ্রাহক নির্বাচন করুন!' : 'Please select a customer first!', 'error');
@@ -322,8 +710,17 @@ export class OrderModule {
     const discount = Number(store.cart.discount) || 0;
     const grandTotal = Math.max(0, subtotal - discount);
 
-    const newOrderId = `BHA-ORD-${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(store.db.orders.length + 1).padStart(3, '0')}`;
-    
+    // অর্ডার আইডি: মাস + এসআর আইডি + ক্রমিক নম্বর (একাধিক এসআর বা অফলাইন অবস্থায়ও আইডি মেলে না)
+    const now = new Date();
+    const ym = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const idTag = store.authSession.user?.id || 'ADM';
+    let seq = store.db.orders.filter(o => o.id.startsWith(`BHA-ORD-${ym}-${idTag}-`)).length + 1;
+    let newOrderId = '';
+    do {
+      newOrderId = `BHA-ORD-${ym}-${idTag}-${String(seq).padStart(3, '0')}`;
+      seq++;
+    } while (store.db.orders.some(o => o.id === newOrderId));
+
     const newOrder: Order = {
       id: newOrderId,
       date: new Date().toISOString().split('T')[0],
@@ -357,8 +754,13 @@ export class OrderModule {
     store.cart.items = {};
     store.cart.discount = 0;
     store.cart.notes = '';
+    store.persistCart();
 
-    showToast(isBn ? `অর্ডার ${newOrderId} সফলভাবে কনফার্ম করা হয়েছে!` : `Order ${newOrderId} confirmed successfully!`);
+    // নেট না থাকলে স্পষ্ট বলা: অর্ডার ফোনে সেভ আছে, নেট এলে নিজে থেকে জমা হবে
+    const offline = (typeof navigator !== 'undefined' && navigator.onLine === false) || store.cloudConnected === false;
+    showToast(offline
+      ? (isBn ? `অর্ডার ${newOrderId} ফোনে সেভ হয়েছে, নেট এলে নিজে থেকে জমা হবে` : `Order ${newOrderId} saved on this device and will sync when you are online`)
+      : (isBn ? `অর্ডার ${newOrderId} সফলভাবে নিশ্চিত হয়েছে!` : `Order ${newOrderId} confirmed successfully!`));
     onOrderPlaced(newOrderId);
   }
 }

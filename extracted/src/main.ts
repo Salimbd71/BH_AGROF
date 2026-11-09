@@ -15,6 +15,7 @@ import { generateInvoicePDF } from './modules/invoice.ts';
 import { renderTopNav, renderSRHeroBanner, showToast, showConfirmDialog } from './modules/ui.ts';
 import { APP_RULES, canAccessTab, canLoginAs } from './config/appMode.ts';
 import { getFirebaseConfig } from './config/firebase.ts';
+import { initPwa } from './modules/pwa.ts';
 
 // Main Application Controller
 export const App = {
@@ -38,6 +39,20 @@ export const App = {
   },
 
   render() {
+    // যেকোনো পেজে টাইপ করার সময় পুরো পেজ নতুন করে আঁকলেও ফোকাস/কার্সর ফিরিয়ে দেয়
+    const ae = document.activeElement as HTMLInputElement | null;
+    const keep = (ae && ae.id && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA'))
+      ? { id: ae.id, start: ae.selectionStart, end: ae.selectionEnd } : null;
+    App.renderInner();
+    if (keep) {
+      const el = document.getElementById(keep.id) as HTMLInputElement | null;
+      if (el && el !== document.activeElement) {
+        el.focus({ preventScroll: true });
+        try { if (keep.start !== null && keep.end !== null) el.setSelectionRange(keep.start, keep.end); } catch { /* number inputs */ }
+      }
+    }
+  },
+  renderInner() {
     const root = document.getElementById('app');
     if (!root) return;
 
@@ -52,6 +67,17 @@ export const App = {
       root.innerHTML = authModule.renderLoginScreen();
       this.refreshIcons();
       return;
+    }
+
+    // ডিলিট করা এসআরের চলমান সেশন বন্ধ
+    if (store.authSession.role === 'sr') {
+      const me = store.db.srs.find(s => s.id === store.authSession.user?.id);
+      if ((me && me.deletedAt) || (!me && store.db.srs.length > 0)) {
+        store.logout();
+        root.innerHTML = authModule.renderLoginScreen();
+        this.refreshIcons();
+        return;
+      }
     }
 
     const isAdmin = store.authSession.role === 'admin';
@@ -76,6 +102,8 @@ export const App = {
       productModule.attachSearchListener();
     } else if (store.activeTab === 'sr_management') {
       authModule.attachSearchListener();
+    } else if (store.activeTab === 'order_booking' && !isAdmin) {
+      orderModule.attachOrderUi();
     } else if (store.activeTab === 'stock_manage' || store.activeTab === 'order_booking') {
       stockModule.attachSearchListener();
     } else if (store.activeTab === 'reports') {
@@ -600,9 +628,9 @@ export const App = {
             <div class="flex items-center gap-3 font-semibold">
               <span>Portal: <b class="${isAdmin ? 'text-purple-600' : 'text-brand-600'}">${isAdmin ? (isBn ? 'অ্যাডমিন কন্ট্রোল' : 'Admin Control') : (isBn ? 'এসআর ফিল্ড বুকিং' : 'SR Field Booking')}</b></span>
               <span>•</span>
-              <span class="${store.isFirebaseReady ? 'text-emerald-600' : 'text-amber-600'} flex items-center gap-1.5 font-bold">
-                <span class="w-2 h-2 rounded-full ${store.isFirebaseReady ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}"></span>
-                <span>${store.isFirebaseReady ? (isBn ? 'ক্লাউড লাইভ সিঙ্ক' : 'Firebase Connected') : (isBn ? 'অফলাইন মোড' : 'Offline Mode')}</span>
+              <span class="${store.isFirebaseReady && store.cloudConnected !== false ? 'text-emerald-600' : 'text-amber-600'} flex items-center gap-1.5 font-bold">
+                <span class="w-2 h-2 rounded-full ${store.isFirebaseReady && store.cloudConnected !== false ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}"></span>
+                <span>${store.isFirebaseReady && store.cloudConnected !== false ? (isBn ? 'ক্লাউড লাইভ সিঙ্ক' : 'Firebase Connected') : (isBn ? 'অফলাইন মোড' : 'Offline Mode')}</span>
               </span>
             </div>
           </div>
@@ -958,18 +986,14 @@ export const App = {
   quickOrder: (pId: string) => {
     const p = store.db.products.find(prod => prod.id === pId);
     if (p) {
-      if (!store.cart.items[pId]) {
-        store.cart.items[pId] = {
-          product: p,
-          qty: 1,
-          freeQty: 0,
-          total: p.tradePrice
-        };
-      } else {
-        store.cart.items[pId].qty += 1;
-        store.cart.items[pId].total = store.cart.items[pId].qty * p.tradePrice;
+      const current = store.cart.items[pId] ? store.cart.items[pId].qty : 0;
+      if (current + 1 > p.stock) {
+        showToast(store.lang === 'bn' ? `স্টকে মাত্র ${p.stock} ইউনিট আছে!` : `Only ${p.stock} units available in stock!`, 'error');
+        return;
       }
-      showToast(`Added ${p.name} to order slip! Opening slip...`);
+      store.setCartItem(p, current + 1);
+      store.persistCart();
+      showToast(store.lang === 'bn' ? `${p.bnName || p.name} অর্ডার স্লিপে যোগ হয়েছে` : `Added ${p.name} to order slip! Opening slip...`);
       App.navigate('order_booking');
     }
   },
@@ -1195,6 +1219,7 @@ export const App = {
 (window as any).OrderActions = {
   setCustomer: (val: string) => {
     store.cart.customerId = val;
+    store.persistCart();
     App.render();
   },
   setCategory: (val: string) => {
@@ -1203,50 +1228,70 @@ export const App = {
   },
   setSearch: (val: string) => {
     store.catalogSearch = val;
-    App.render();
+    // শুধু প্রোডাক্ট লিস্ট আপডেট, সার্চ বক্স নতুন করে আঁকা হয় না (কীবোর্ড বন্ধ হয় না)
+    if (!orderModule.refreshCatalogOnly()) App.render();
   },
   updateQty: (pId: string, qty: number) => {
     const prod = store.db.products.find(p => p.id === pId);
     if (!prod) return;
-    if (qty <= 0) {
-      delete store.cart.items[pId];
-    } else {
-      if (qty > prod.stock) {
-        showToast(`Only ${prod.stock} units available in stock!`, 'error');
-        return;
-      }
-      let freeQty = 0;
-      if (prod.tradeOffer && prod.tradeOffer.includes('10+1')) freeQty = Math.floor(qty / 10);
-      else if (prod.tradeOffer && prod.tradeOffer.includes('20+2')) freeQty = Math.floor(qty / 20) * 2;
-      else if (prod.tradeOffer && prod.tradeOffer.includes('25+3')) freeQty = Math.floor(qty / 25) * 3;
-      else if (prod.tradeOffer && prod.tradeOffer.includes('15+1')) freeQty = Math.floor(qty / 15);
-
-      store.cart.items[pId] = {
-        product: prod,
-        qty: qty,
-        freeQty: freeQty,
-        total: qty * prod.tradePrice
-      };
+    if (qty > prod.stock) {
+      showToast(store.lang === 'bn' ? `স্টকে মাত্র ${prod.stock} ইউনিট আছে!` : `Only ${prod.stock} units available in stock!`, 'error');
+      return;
     }
-    App.render();
+    store.setCartItem(prod, Math.max(0, Math.floor(Number(qty) || 0)));
+    store.persistCart();
+    if (!orderModule.refreshOrderPartial()) App.render();
   },
   clearCart: () => {
     store.cart.items = {};
     store.cart.discount = 0;
     store.cart.notes = '';
-    App.render();
+    store.persistCart();
+    if (!orderModule.refreshOrderPartial()) App.render();
   },
   setDiscount: (val: string) => {
     store.cart.discount = Math.max(0, Number(val) || 0);
-    App.render();
+    store.persistCart();
+    // শুধু মোট হিসাব আপডেট, ডিসকাউন্ট বক্স নতুন করে আঁকা হয় না
+    if (!orderModule.refreshTotalsOnly()) App.render();
   },
   setNotes: (val: string) => {
     store.cart.notes = val;
+    store.persistCart();
   },
+  scrollToSlip: () => orderModule.scrollToSlip(),
   submitOrder: () => {
-    orderModule.submitOrder((newId) => {
-      App.navigate('my_orders');
-    }, showToast);
+    if (orderModule.isSubmitting) return;
+    const isBn = store.lang === 'bn';
+    const keys = Object.keys(store.cart.items);
+    const customer = store.db.customers.find(c => c.id === store.cart.customerId);
+    const doSubmit = () => {
+      orderModule.submitOrder(() => {
+        App.navigate('my_orders');
+      }, showToast);
+    };
+    // কাস্টমার/আইটেম না থাকলে সরাসরি ত্রুটির বার্তা দেখাবে
+    if (!customer || keys.length === 0) { doSubmit(); return; }
+
+    const t = orderModule.getCartTotals();
+    const lines = keys.map(k => {
+      const it = store.cart.items[k];
+      const name = isBn ? (it.product.bnName || it.product.name) : it.product.name;
+      return `<div class="flex justify-between gap-3"><span class="truncate">${name} × ${it.qty}${it.freeQty ? ` (+${it.freeQty} ${isBn ? 'ফ্রি' : 'free'})` : ''}</span><b>৳${it.total.toLocaleString()}</b></div>`;
+    }).join('');
+    showConfirmDialog({
+      title: isBn ? 'অর্ডার জমা দেবেন?' : 'Submit this order?',
+      message: `${customer.id} ${customer.shopName}`,
+      details: `<div class="space-y-1 max-h-48 overflow-y-auto">${lines}</div>
+        <div class="mt-2 pt-2 border-t border-slate-200 dark:border-slate-700 space-y-0.5">
+          ${t.discount > 0 ? `<div class="flex justify-between text-rose-500"><span>${store.t('discount')}</span><b>-৳${t.discount.toLocaleString()}</b></div>` : ''}
+          <div class="flex justify-between text-sm font-black text-slate-900 dark:text-white"><span>${store.t('grandTotal')}</span><span>৳${t.grand.toLocaleString()}</span></div>
+        </div>`,
+      confirmText: isBn ? 'হ্যাঁ, জমা দিন' : 'Yes, Submit',
+      cancelText: isBn ? 'ফিরে যান' : 'Go back',
+      type: 'info',
+      onConfirm: doSubmit
+    });
   }
 };
 
@@ -1279,7 +1324,7 @@ export const App = {
     const userInput = (document.getElementById('srLoginUsername') as HTMLInputElement).value.trim();
     const passInput = (document.getElementById('srLoginPassword') as HTMLInputElement).value.trim();
 
-    const foundSR = (store.db.srs || []).find(s => 
+    const foundSR = store.getActiveSrs().find(s => 
       (s.username === userInput || s.id.toLowerCase() === userInput.toLowerCase()) && 
       (s.password === passInput || s.pin === passInput)
     );
@@ -1342,18 +1387,33 @@ export const App = {
   },
   deleteSR: (id: string) => {
     const sr = store.db.srs.find(s => s.id === id);
+    if (!sr) return;
+    const isBN = store.lang === 'bn';
+    const assigned = (store.db.customers || []).filter(c => (c.assignedSrId || c.createdBy) === id).length;
     showConfirmDialog({
-      title: 'Delete SR Account',
-      message: `Are you sure you want to delete SR account "${sr?.name || id}"?`,
-      confirmText: 'Yes, Delete SR',
+      title: isBN ? 'এসআর অ্যাকাউন্ট ডিলিট' : 'Delete SR Account',
+      message: isBN
+        ? `"${sr.name}" (${sr.id}) আর লগইন করতে পারবে না। তার সব অর্ডার ও বিক্রির তথ্য থেকে যাবে।${assigned ? ` তার অধীনে ${assigned} জন কাস্টমার আছে, পরে অন্য এসআরকে দিন।` : ''}`
+        : `"${sr.name}" (${sr.id}) will no longer be able to log in. All orders and sales data are kept.${assigned ? ` ${assigned} customer(s) are assigned to this SR - reassign them afterwards.` : ''}`,
+      confirmText: isBN ? 'হ্যাঁ, ডিলিট করুন' : 'Yes, Delete SR',
       type: 'danger',
       onConfirm: () => {
-        store.db.srs = store.db.srs.filter(s => s.id !== id);
+        sr.deletedAt = new Date().toISOString();
+        sr.active = false;
         store.saveDatabase();
-        showToast('SR Account removed.');
+        showToast(isBN ? 'এসআর ডিলিট হয়েছে। বিক্রির তথ্য সংরক্ষিত আছে।' : 'SR removed. Sales data is kept.');
         App.render();
       }
     });
+  },
+  restoreSR: (id: string) => {
+    const sr = store.db.srs.find(s => s.id === id);
+    if (!sr) return;
+    delete sr.deletedAt;
+    sr.active = true;
+    store.saveDatabase();
+    showToast(store.lang === 'bn' ? 'এসআর আবার চালু হয়েছে।' : 'SR restored.');
+    App.render();
   },
   downloadTemplate: () => {
     const XLSX = (window as any).XLSX;
@@ -1418,12 +1478,14 @@ export const App = {
 
         let added = 0;
         let updated = 0;
+        let skipped = 0;
+        let nextNum = parseInt(store.getNextSrId().replace(/\D/g, ''), 10);
 
         rows.forEach((r, idx) => {
           const name = (r['Full Name'] || r['Name'] || r['name'] || '').toString().trim();
           if (!name) return;
 
-          let srId = (r['SR ID'] || r['id'] || r['ID'] || `SR${String(store.db.srs.length + 1 + idx).padStart(2, '0')}`).toString().trim().toUpperCase();
+          let srId = (r['SR ID'] || r['id'] || r['ID'] || `SR${String(nextNum++).padStart(2, '0')}`).toString().trim().toUpperCase();
           const username = (r['Username'] || r['username'] || srId.toLowerCase()).toString().trim().toLowerCase();
           const password = (r['Password'] || r['password'] || '123').toString().trim();
           const phone = (r['Mobile Phone'] || r['Phone'] || r['phone'] || '01700-000000').toString().trim();
@@ -1433,7 +1495,10 @@ export const App = {
           const activeStr = (r['Active'] || r['active'] || 'yes').toString().toLowerCase();
           const isActive = !activeStr.includes('no') && !activeStr.includes('inactive');
 
-          const existingIndex = store.db.srs.findIndex(s => s.id.toUpperCase() === srId || s.username === username);
+          const existingIndex = store.db.srs.findIndex(s => s.id.toUpperCase() === srId || (!s.deletedAt && s.username === username));
+          // ডিলিট করা এসআরের আইডি বা অর্ডারে ব্যবহৃত পুরনো আইডি আবার ব্যবহার করা যাবে না
+          if (existingIndex >= 0 && store.db.srs[existingIndex].deletedAt) { skipped++; return; }
+          if (existingIndex < 0 && store.isSrIdUsed(srId)) { skipped++; return; }
           if (existingIndex >= 0) {
             store.db.srs[existingIndex].name = name;
             store.db.srs[existingIndex].password = password;
@@ -1460,7 +1525,7 @@ export const App = {
         });
 
         store.saveDatabase();
-        showToast(`SR Accounts: ${added} added, ${updated} updated! Realtime DB Synced.`);
+        showToast(`SR Accounts: ${added} added, ${updated} updated${skipped ? `, ${skipped} skipped (ID already used/deleted)` : ''}! Realtime DB Synced.`);
         App.render();
       } catch (err: any) {
         showToast('Failed to import SRs: ' + err.message, 'error');
@@ -1526,6 +1591,17 @@ const dismissSplashScreen = () => {
 window.addEventListener('DOMContentLoaded', () => {
   router.init(() => App.render());
   App.render();
+  initPwa();
+
+  // ডেস্কটপ: "/" চাপলে পেজের সার্চ বক্সে ফোকাস
+  document.addEventListener('keydown', (e: KeyboardEvent) => {
+    const t = e.target as HTMLElement | null;
+    const typing = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
+    if (e.key === '/' && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const box = document.querySelector<HTMLInputElement>('main input[id*="earch"]');
+      if (box) { e.preventDefault(); box.focus(); box.select(); }
+    }
+  });
 
   // Natural splash duration (app displays veterinary emblem and circular spinner)
   setTimeout(dismissSplashScreen, 950);
