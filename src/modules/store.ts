@@ -777,6 +777,9 @@ export class Store {
           this.firebaseApp = fb.app();
         }
         this.firebaseDb = fb.database();
+
+        // সব লিসেনার/সিঙ্ক শুরু হয় অজ্ঞাত (anonymous) সাইন-ইনের পরে, যাতে rules (auth != null) এর সাথে কাজ করে
+        const attach = () => {
         this.isFirebaseReady = true;
 
         const updateFromSnapshot = (val: any) => {
@@ -842,6 +845,31 @@ export class Store {
             });
           }
         });
+        };
+
+        // ব্যবহারকারীর কিছু করতে হয় না: অ্যাপ নিজে পেছনে anonymous sign-in করে নেয়।
+        // সাইন-ইন ব্যর্থ হলেও (যেমন Anonymous চালু করা হয়নি) আগের মতো সংযোগ চেষ্টা করা হয়।
+        const auth = typeof fb.auth === 'function' ? fb.auth() : null;
+        if (!auth) {
+          attach();
+        } else {
+          let started = false;
+          let signing = false;
+          const go = () => { if (!started) { started = true; attach(); } };
+          const unsub = auth.onAuthStateChanged((u: any) => {
+            if (u) {
+              unsub();
+              go();
+            } else if (!signing) {
+              signing = true;
+              auth.signInAnonymously().catch((err: any) => {
+                console.warn('Firebase anonymous sign-in failed:', err);
+                unsub();
+                go();
+              });
+            }
+          });
+        }
       }
     } catch (e) {
       console.warn('Firebase initialization skipped/failed:', e);
