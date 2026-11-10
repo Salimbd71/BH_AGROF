@@ -229,7 +229,7 @@ function pageHtml(ord: Order, idxs: number[], pageNo: number, total: number): st
     </table>
     ${isLast ? lastBlockHtml(ord) : ''}
     <div style="position:absolute;left:${PAD_X}px;right:${PAD_X}px;bottom:18px;display:flex;justify-content:space-between;align-items:center;font-size:10px;color:#64748b;border-top:1px solid #e2e8f0;padding-top:6px;">
-      <span>BH Agro Ltd. &bull; INV: ${ord.id}</span>
+      <span>BH Agro Ltd. &#8226; INV: ${ord.id}</span>
       <span style="font-weight:bold;color:#334155;">Page ${pageNo} of ${total}</span>
     </div>
   </div>`;
@@ -338,39 +338,70 @@ function saveBlob(blob: Blob, fileName: string) {
   setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 4000);
 }
 
-/** PDF ডাউনলোড: A4, একাধিক পেজ, প্রতি পেজে একই হেডিং ও পেজ নম্বর */
+/** একটি A4 পেজকে (HTML) সরাসরি ক্যানভাসে আঁকে: SVG foreignObject দিয়ে, তাই পজিশন/স্ক্রল/ডান-বাম কাটার সমস্যা নেই */
+async function renderPageToCanvas(pageHtml: string, scale: number = 2): Promise<HTMLCanvasElement> {
+  const tmp = document.createElement('div');
+  tmp.innerHTML = pageHtml;
+  const node = tmp.firstElementChild as HTMLElement;
+  node.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml');
+  const xhtml = new XMLSerializer().serializeToString(node);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${PAGE_W}" height="${PAGE_H}" viewBox="0 0 ${PAGE_W} ${PAGE_H}"><foreignObject x="0" y="0" width="${PAGE_W}" height="${PAGE_H}">${xhtml}</foreignObject></svg>`;
+  const img = new Image();
+  await new Promise<void>((resolve, reject) => {
+    img.onload = () => resolve();
+    img.onerror = () => reject(new Error('svg render failed'));
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+  });
+  const canvas = document.createElement('canvas');
+  canvas.width = PAGE_W * scale;
+  canvas.height = PAGE_H * scale;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('no canvas');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.scale(scale, scale);
+  ctx.drawImage(img, 0, 0, PAGE_W, PAGE_H);
+  canvasToJpeg(canvas); // টেইন্টেড হলে এখানেই এরর, তখন ফলব্যাক
+  return canvas;
+}
+
+/** ফলব্যাক: html2pdf (html2canvas) দিয়ে একটি পেজ ক্যানভাসে */
+async function renderPageViaHtml2pdf(pageHtml: string): Promise<HTMLCanvasElement> {
+  const html2pdf = (window as any).html2pdf;
+  if (!html2pdf) throw new Error('no html2pdf');
+  const host = document.createElement('div');
+  host.style.cssText = `position:absolute;left:0;top:0;width:${PAGE_W}px;margin:0;padding:0;background:#fff;`;
+  host.innerHTML = pageHtml;
+  document.body.appendChild(host);
+  try {
+    return await html2pdf()
+      .set({ html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', x: 0, y: 0, scrollX: 0, scrollY: 0, windowWidth: PAGE_W } })
+      .from(host.firstElementChild)
+      .toCanvas()
+      .get('canvas');
+  } finally {
+    host.remove();
+  }
+}
+
+/** PDF ডাউনলোড: A4, একাধিক পেজ, প্রতি পেজে একই হেডিং ও পেজ নম্বর (প্রিন্ট/প্রিভিউয়ের সাথে একই লেআউট) */
 export function generateInvoicePDF(ord: Order, showToast: (msg: string, type?: string) => void) {
   const targetPdfFileName = invoiceFileName(ord);
-  const html2pdf = (window as any).html2pdf;
-  if (!html2pdf) {
-    printInvoiceDocument(ord);
-    return;
-  }
   showToast(`Generating PDF: ${targetPdfFileName}...`);
-
-  const host = document.createElement('div');
-  host.setAttribute('aria-hidden', 'true');
-  host.style.cssText = `position:fixed;left:-10000px;top:0;width:${PAGE_W}px;background:#ffffff;margin:0;padding:0;`;
-  host.innerHTML = buildInvoicePages(ord).join('');
-  document.body.appendChild(host);
-
+  const pages = buildInvoicePages(ord);
   (async () => {
     try {
       const jpegs: JpegImg[] = [];
-      for (const pageEl of Array.from(host.children)) {
-        const canvas: HTMLCanvasElement = await html2pdf()
-          .set({ html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', scrollX: 0, scrollY: 0, windowWidth: PAGE_W } })
-          .from(pageEl)
-          .toCanvas()
-          .get('canvas');
+      for (const pg of pages) {
+        let canvas: HTMLCanvasElement;
+        try { canvas = await renderPageToCanvas(pg); }
+        catch { canvas = await renderPageViaHtml2pdf(pg); }
         jpegs.push(canvasToJpeg(canvas));
       }
       saveBlob(buildPdfFromJpegs(jpegs), targetPdfFileName);
       showToast(`Invoice downloaded: ${targetPdfFileName}!`);
     } catch {
       printInvoiceDocument(ord);
-    } finally {
-      host.remove();
     }
   })();
 }
