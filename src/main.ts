@@ -11,11 +11,22 @@ import { productModule } from './modules/products.ts';
 import { orderModule } from './modules/orders.ts';
 import { reportModule } from './modules/reports.ts';
 import { stockModule } from './modules/stock.ts';
-import { generateInvoicePDF } from './modules/invoice.ts';
 import { renderTopNav, renderSRHeroBanner, showToast, showConfirmDialog } from './modules/ui.ts';
 import { APP_RULES, canAccessTab, canLoginAs } from './config/appMode.ts';
 import { getFirebaseConfig } from './config/firebase.ts';
 import { initPwa } from './modules/pwa.ts';
+import { openOrderPreview } from './modules/orderPreview.ts';
+import { unitsNeeded, parseTiers, getFreeTiers, getDiscountPct, calcAdp, formatTiers, type FreeTier } from './modules/pricing.ts';
+
+/** প্রোডাক্টের ছাড় ও ফ্রি-ধাপ একসাথে বসায় এবং দেখানোর লেখা (tradeOffer) ঠিক রাখে */
+function setProductOffer(p: any, discountPct: number, tiers: FreeTier[]) {
+  p.discountPct = discountPct;
+  p.freeTiers = tiers;
+  const parts: string[] = [];
+  if (discountPct > 0) parts.push(`${discountPct}% Disc`);
+  if (tiers.length) parts.push(formatTiers(tiers));
+  p.tradeOffer = parts.length ? parts.join(' · ') : 'Standard';
+}
 
 // Main Application Controller
 export const App = {
@@ -317,7 +328,7 @@ export const App = {
               <i data-lucide="calendar-check" class="w-6 h-6 text-brand-600"></i>
               <span>${isBn ? 'আমার ফিল্ড বুকিং ও ইনভয়েস' : 'My Field Bookings & Invoices'}</span>
             </h2>
-            <p class="text-xs text-slate-500">${isBn ? 'মাঠ পর্যায়ে আপনার কৃত অর্ডার ও তাৎক্ষণিক ইনভয়েস তালিকা।' : 'Orders placed by you on the field. Instantly download or print invoice.'}</p>
+            <p class="text-xs text-slate-500">${isBn ? 'আপনার নেওয়া সব অর্ডার। ইনভয়েস দেখতে "প্রিভিউ" চাপুন।' : 'Orders placed by you. Tap Preview to view the invoice.'}</p>
           </div>
           <button onclick="window.App.navigate('order_booking')" class="px-4 py-2 bg-brand-600 text-white rounded-xl text-xs font-bold shadow hover:bg-brand-500 transition">
             ${isBn ? '+ নতুন বুকিং' : '+ New Booking'}
@@ -348,9 +359,9 @@ export const App = {
               </div>
 
               <div class="flex items-center gap-2">
-                <button onclick="window.App.printInvoice('${o.id}')" class="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs shadow flex items-center gap-1.5 transition active:scale-95">
-                  <i data-lucide="printer" class="w-3.5 h-3.5"></i>
-                  <span>${store.t('printInvoice')}</span>
+                <button onclick="window.App.previewOrder('${o.id}')" class="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs shadow flex items-center gap-1.5 transition active:scale-95">
+                  <i data-lucide="eye" class="w-3.5 h-3.5"></i>
+                  <span>${isBn ? 'প্রিভিউ' : 'Preview'}</span>
                 </button>
               </div>
             </div>
@@ -408,9 +419,9 @@ export const App = {
                   </td>
                   <td class="py-3 text-right">
                     <div class="flex items-center justify-end gap-1.5">
-                      <button onclick="window.App.printInvoice('${o.id}')" class="px-2.5 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-[11px] shadow-sm flex items-center gap-1" title="${store.t('printInvoice')}">
-                        <i data-lucide="printer" class="w-3.5 h-3.5"></i>
-                        <span>${isBn ? 'প্রিন্ট' : 'Print'}</span>
+                      <button onclick="window.App.previewOrder('${o.id}')" class="px-2.5 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-[11px] shadow-sm flex items-center gap-1" title="${store.t('printInvoice')}">
+                        <i data-lucide="eye" class="w-3.5 h-3.5"></i>
+                        <span>${isBn ? 'প্রিভিউ / প্রিন্ট' : 'Preview / Print'}</span>
                       </button>
                       <button onclick="window.App.deleteOrder('${o.id}')" class="p-1.5 rounded-xl border border-rose-200 dark:border-rose-900 text-rose-600 hover:bg-rose-50 text-[11px]" title="${isBn ? 'অর্ডার মুছুন' : 'Delete Order'}">
                         <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
@@ -429,6 +440,9 @@ export const App = {
   renderAdminDashboard(): string {
     const totalSales = store.db.orders.reduce((sum, o) => sum + o.grandTotal, 0);
     const totalOrders = store.db.orders.length;
+    const monthKey = new Date().toISOString().slice(0, 7);
+    const monthOrdersList = store.db.orders.filter(o => (o.date || '').slice(0, 7) === monthKey);
+    const monthSales = monthOrdersList.reduce((sum, o) => sum + o.grandTotal, 0);
     const pendingApprovals = store.db.customers.filter(c => c.status === 'pending').length;
     const totalInventoryValue = store.db.products.reduce((sum, p) => sum + (p.stock * p.tradePrice), 0);
     const lowStockProducts = store.db.products.filter(p => p.stock > 0 && p.stock < 10);
@@ -465,6 +479,7 @@ export const App = {
               <div class="p-2 rounded-xl bg-brand-50 dark:bg-brand-950/60"><i data-lucide="banknote" class="w-4 h-4"></i></div>
             </div>
             <div class="text-xl sm:text-2xl font-black text-slate-900 dark:text-white">৳${totalSales.toLocaleString()}</div>
+            <div class="text-xs text-slate-600 dark:text-slate-300 font-bold mt-1">${isBn ? 'চলতি মাস' : 'This month'}: ৳${monthSales.toLocaleString()} (${monthOrdersList.length})</div>
             <div class="text-xs text-emerald-600 font-semibold mt-1">${totalOrders} ${isBn ? 'টি সম্পন্ন অর্ডার' : 'orders processed'}</div>
           </div>
 
@@ -506,6 +521,7 @@ export const App = {
   },
 
   deleteOrder(orderId: string) {
+    if (store.authSession.role !== 'admin') return; // এসআর অর্ডার ডিলিট করতে পারবে না
     const ord = store.db.orders.find(o => o.id === orderId);
     if (!ord) return;
     showConfirmDialog({
@@ -517,7 +533,7 @@ export const App = {
         if (ord && ord.items) {
           ord.items.forEach(it => {
             const p = store.db.products.find(prod => prod.id === it.productId);
-            if (p) p.stock += it.qty;
+            if (p) p.stock += it.qty + (it.freeQty || 0); // কেনা + ফ্রি, দুটোই ফেরত
           });
         }
         store.db.orders = store.db.orders.filter(o => o.id !== orderId);
@@ -528,13 +544,9 @@ export const App = {
     });
   },
 
-  printInvoice(orderId: string) {
-    const ord = store.db.orders.find(o => o.id === orderId);
-    if (!ord) {
-      showToast('Order not found!', 'error');
-      return;
-    }
-    generateInvoicePDF(ord, showToast);
+  /** অর্ডার প্রিভিউ ডায়ালগ (অ্যাডমিনে Print/Download/Edit/Close, এসআরে শুধু প্রিভিউ) */
+  previewOrder(orderId: string) {
+    openOrderPreview(orderId);
   },
 
   openFirebaseModal() {
@@ -987,8 +999,10 @@ export const App = {
     const p = store.db.products.find(prod => prod.id === pId);
     if (p) {
       const current = store.cart.items[pId] ? store.cart.items[pId].qty : 0;
-      if (current + 1 > p.stock) {
-        showToast(store.lang === 'bn' ? `স্টকে মাত্র ${p.stock} ইউনিট আছে!` : `Only ${p.stock} units available in stock!`, 'error');
+      if (!store.canOrderQty(p, current + 1)) {
+        showToast(store.lang === 'bn'
+          ? `স্টকের কারণে আর বাড়ানো যাবে না (আছে ${p.stock}টি)`
+          : `Stock limit reached (${p.stock} in stock)`, 'error');
         return;
       }
       store.setCartItem(p, current + 1);
@@ -1058,42 +1072,81 @@ export const App = {
       }
     });
   },
+  previewAdp: (pId: string) => {
+    const tp = Number((document.getElementById(`tpInput-${pId}`) as HTMLInputElement | null)?.value) || 0;
+    const d = Math.min(100, Math.max(0, Number((document.getElementById(`discInput-${pId}`) as HTMLInputElement | null)?.value) || 0));
+    const cell = document.getElementById(`adpCell-${pId}`);
+    if (cell) cell.textContent = (Math.round(tp * (100 - d)) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 });
+  },
   saveRowPrice: (pId: string) => {
     const tpInput = document.getElementById(`tpInput-${pId}`) as HTMLInputElement | null;
     const mrpInput = document.getElementById(`mrpInput-${pId}`) as HTMLInputElement | null;
-    const offerInput = document.getElementById(`offerInput-${pId}`) as HTMLInputElement | null;
+    const discInput = document.getElementById(`discInput-${pId}`) as HTMLInputElement | null;
+    const tiersInput = document.getElementById(`tiersInput-${pId}`) as HTMLInputElement | null;
     const p = store.db.products.find(prod => prod.id === pId);
-    if (p && tpInput && mrpInput && offerInput) {
-      const tp = Math.max(1, Number(tpInput.value) || p.tradePrice);
-      const mrp = Math.max(1, Number(mrpInput.value) || p.mrp);
-      const offer = offerInput.value.trim() || 'Standard';
-
-      p.tradePrice = tp;
-      p.mrp = mrp;
-      p.tradeOffer = offer;
-      store.saveDatabase();
-      showToast(`Saved price & offer for ${p.name}!`);
+    if (!(p && tpInput && mrpInput && discInput && tiersInput)) return;
+    const tp = Number(tpInput.value);
+    const mrp = Number(mrpInput.value);
+    if (!(tp > 0) || !(mrp > 0)) {
+      showToast(store.lang === 'bn' ? 'TP ও MRP শূন্যের বেশি হতে হবে' : 'TP and MRP must be greater than zero', 'error');
+      return;
     }
+    const disc = Math.min(100, Math.max(0, Number(discInput.value) || 0));
+    const tiers = parseTiers(tiersInput.value);
+    if (tiersInput.value.trim() && tiers.length === 0) {
+      showToast(store.lang === 'bn' ? 'ফ্রি অফার ভুল ফরম্যাটে। এভাবে লিখুন: 10+1, 20+3' : 'Invalid free offer. Use format: 10+1, 20+3', 'error');
+      return;
+    }
+    p.tradePrice = tp;
+    p.mrp = mrp;
+    setProductOffer(p, disc, tiers);
+    store.syncCartWithProducts();
+    store.saveDatabase();
+    showToast(store.lang === 'bn' ? `${p.name} সেভ হয়েছে (ADP ৳${calcAdp(p)})` : `Saved ${p.name} (ADP ৳${calcAdp(p)})`);
+    App.render();
   },
-  applyBulkOffer: () => {
-    const catSelect = document.getElementById('bulkCategorySelect') as HTMLSelectElement | null;
-    const offerInput = document.getElementById('bulkOfferPreset') as HTMLInputElement | null;
-    if (!catSelect || !offerInput) return;
-    const selectedCat = catSelect.value;
-    const offerVal = offerInput.value.trim();
-    if (!offerVal) {
-      showToast('Please type an offer preset (e.g. 10+1 Free)', 'error');
+  applyBulkDiscount: () => {
+    const cat = (document.getElementById('bulkCategorySelect') as HTMLSelectElement | null)?.value || 'all';
+    const raw = (document.getElementById('bulkDiscountInput') as HTMLInputElement | null)?.value;
+    const d = Number(raw);
+    if (raw === undefined || raw === '' || !(d >= 0 && d <= 100)) {
+      showToast(store.lang === 'bn' ? '০ থেকে ১০০ এর মধ্যে ছাড় % লিখুন' : 'Enter a discount % between 0 and 100', 'error');
       return;
     }
     let count = 0;
     store.db.products.forEach(p => {
-      if (selectedCat === 'all' || p.category === selectedCat) {
-        p.tradeOffer = offerVal;
-        count++;
-      }
+      if (cat === 'all' || p.category === cat) { setProductOffer(p, d, getFreeTiers(p)); count++; }
     });
+    store.syncCartWithProducts();
     store.saveDatabase();
-    showToast(`Applied "${offerVal}" to ${count} products!`);
+    showToast(store.lang === 'bn' ? `${count}টি প্রোডাক্টে ${d}% ছাড় বসেছে` : `Applied ${d}% discount to ${count} products`);
+    App.render();
+  },
+  applyBulkFree: () => {
+    const cat = (document.getElementById('bulkCategorySelect') as HTMLSelectElement | null)?.value || 'all';
+    const tiers = parseTiers((document.getElementById('bulkFreeInput') as HTMLInputElement | null)?.value || '');
+    if (tiers.length === 0) {
+      showToast(store.lang === 'bn' ? 'ফ্রি অফার লিখুন, যেমন: 10+1, 20+3' : 'Type a free offer, e.g. 10+1, 20+3', 'error');
+      return;
+    }
+    let count = 0;
+    store.db.products.forEach(p => {
+      if (cat === 'all' || p.category === cat) { setProductOffer(p, getDiscountPct(p), tiers); count++; }
+    });
+    store.syncCartWithProducts();
+    store.saveDatabase();
+    showToast(store.lang === 'bn' ? `${count}টি প্রোডাক্টে ফ্রি অফার বসেছে` : `Applied free offer to ${count} products`);
+    App.render();
+  },
+  clearBulkFree: () => {
+    const cat = (document.getElementById('bulkCategorySelect') as HTMLSelectElement | null)?.value || 'all';
+    let count = 0;
+    store.db.products.forEach(p => {
+      if (cat === 'all' || p.category === cat) { setProductOffer(p, getDiscountPct(p), []); count++; }
+    });
+    store.syncCartWithProducts();
+    store.saveDatabase();
+    showToast(store.lang === 'bn' ? `${count}টি প্রোডাক্টের ফ্রি অফার মোছা হয়েছে` : `Removed free offers from ${count} products`);
     App.render();
   },
   downloadTemplate: () => {
@@ -1112,7 +1165,8 @@ export const App = {
         'Trade Price': 320,
         'MRP': 380,
         'Stock': 200,
-        'Trade Offer': '10+1 Free',
+        'Discount %': 5,
+        'Free Offer': '10+1, 20+2',
         'Batch No': 'B26-001',
         'Dosage': 'Poultry CRD & Colibacillosis'
       },
@@ -1125,7 +1179,8 @@ export const App = {
         'Trade Price': 450,
         'MRP': 540,
         'Stock': 150,
-        'Trade Offer': '15+1 Free',
+        'Discount %': 5,
+        'Free Offer': '',
         'Batch No': 'B26-002',
         'Dosage': 'High-yield Dairy Cow & Layer'
       }
@@ -1174,6 +1229,8 @@ export const App = {
           const mrp = Number(r['MRP'] || r['mrp'] || Math.round(tp * 1.2));
           const stock = Number(r['Stock'] || r['stock'] || 100);
           const offer = (r['Trade Offer'] || r['offer'] || 'Standard').toString().trim();
+          const discRaw = r['Discount %'] ?? r['Discount'] ?? r['discount'];
+          const freeRaw = r['Free Offer'] ?? r['free'] ?? r['Free'];
 
           const existingIndex = store.db.products.findIndex(p => p.sku.toLowerCase() === sku.toLowerCase());
           if (existingIndex >= 0) {
@@ -1184,7 +1241,14 @@ export const App = {
             store.db.products[existingIndex].tradePrice = tp;
             store.db.products[existingIndex].mrp = mrp;
             store.db.products[existingIndex].stock = stock;
-            store.db.products[existingIndex].tradeOffer = offer;
+            const ex = store.db.products[existingIndex];
+            if (discRaw !== undefined || freeRaw !== undefined) {
+              const d = (discRaw !== undefined && String(discRaw).trim() !== '') ? Math.min(100, Math.max(0, Number(discRaw) || 0)) : getDiscountPct(ex);
+              const tiers = freeRaw !== undefined ? parseTiers(String(freeRaw)) : getFreeTiers(ex);
+              setProductOffer(ex, d, tiers);
+            } else if (ex.freeTiers === undefined && ex.discountPct === undefined) {
+              ex.tradeOffer = offer; // পুরনো ধাঁচের অফার লেখা
+            }
             updated++;
           } else {
             store.db.products.push({
@@ -1200,6 +1264,11 @@ export const App = {
               tradeOffer: offer,
               batchNo: `B26-${Date.now().toString().slice(-3)}`
             });
+            if (discRaw !== undefined || freeRaw !== undefined) {
+              const np = store.db.products[store.db.products.length - 1];
+              const d = (discRaw !== undefined && String(discRaw).trim() !== '') ? Math.min(100, Math.max(0, Number(discRaw) || 0)) : 0;
+              setProductOffer(np, d, freeRaw !== undefined ? parseTiers(String(freeRaw)) : []);
+            }
             added++;
           }
         });
@@ -1234,11 +1303,15 @@ export const App = {
   updateQty: (pId: string, qty: number) => {
     const prod = store.db.products.find(p => p.id === pId);
     if (!prod) return;
-    if (qty > prod.stock) {
-      showToast(store.lang === 'bn' ? `স্টকে মাত্র ${prod.stock} ইউনিট আছে!` : `Only ${prod.stock} units available in stock!`, 'error');
+    const want = Math.max(0, Math.floor(Number(qty) || 0));
+    if (want > 0 && !store.canOrderQty(prod, want)) {
+      const need = unitsNeeded(prod, want);
+      showToast(store.lang === 'bn'
+        ? `স্টকের কারণে আর বাড়ানো যাবে না: ফ্রিসহ ${need}টি লাগবে, আছে ${prod.stock}টি`
+        : `Stock limit: ${need} units needed incl. free, only ${prod.stock} in stock`, 'error');
       return;
     }
-    store.setCartItem(prod, Math.max(0, Math.floor(Number(qty) || 0)));
+    store.setCartItem(prod, want);
     store.persistCart();
     if (!orderModule.refreshOrderPartial()) App.render();
   },
@@ -1384,6 +1457,10 @@ export const App = {
   },
   openAddSRModal: () => {
     authModule.openAddSRModal(() => App.render());
+  },
+  editSR: (id: string) => {
+    if (store.authSession.role !== 'admin') return; // শুধু অ্যাডমিন এসআর এডিট করতে পারে
+    authModule.openAddSRModal(() => App.render(), id);
   },
   deleteSR: (id: string) => {
     const sr = store.db.srs.find(s => s.id === id);
@@ -1545,6 +1622,10 @@ export const App = {
 };
 
 (window as any).ReportActions = {
+  setMonth: (m: string) => {
+    reportModule.setMonth(m);
+    App.render();
+  },
   exportSRWise: () => reportModule.exportSRWiseToExcel(showToast),
   exportCustomerWise: () => reportModule.exportCustomerWiseToExcel(showToast),
   exportDaywise: () => reportModule.exportDaywiseToExcel(showToast),

@@ -7,15 +7,119 @@
 import { store } from './store.ts';
 
 export class ReportModule {
+  /** নির্বাচিত মাস: "YYYY-MM" অথবা "all" (শুরুতে চলতি মাস) */
+  selectedMonth: string = new Date().toISOString().slice(0, 7);
+
+  setMonth(m: string) {
+    this.selectedMonth = m || 'all';
+  }
+
+  /** নিজের (এসআর) অথবা সব (অ্যাডমিন) অর্ডার, মাসের ফিল্টার ছাড়া */
+  scopedOrders(): import('./store.ts').Order[] {
+    const isSR = store.authSession.role !== 'admin';
+    const srId = store.authSession.user?.id;
+    return isSR ? store.db.orders.filter(o => o.srId === srId) : store.db.orders;
+  }
+
+  /** নির্বাচিত মাসের অর্ডার */
+  monthOrders(): import('./store.ts').Order[] {
+    const base = this.scopedOrders();
+    if (this.selectedMonth === 'all') return base;
+    return base.filter(o => (o.date || '').slice(0, 7) === this.selectedMonth);
+  }
+
+  monthLabel(m: string): string {
+    if (m === 'all') return store.lang === 'bn' ? 'সব সময়' : 'All time';
+    const [y, mo] = m.split('-').map(Number);
+    return new Date(y, (mo || 1) - 1, 1).toLocaleDateString(store.lang === 'bn' ? 'bn-BD' : 'en-GB', { month: 'long', year: 'numeric' });
+  }
+
+  /** মাসভিত্তিক সারাংশ (নতুন থেকে পুরনো) */
+  monthSummaries() {
+    const map: Record<string, { month: string; orders: number; sales: number; discount: number; free: number; customers: Set<string> }> = {};
+    const current = new Date().toISOString().slice(0, 7);
+    map[current] = { month: current, orders: 0, sales: 0, discount: 0, free: 0, customers: new Set() };
+    this.scopedOrders().forEach(o => {
+      const m = (o.date || '').slice(0, 7);
+      if (!m) return;
+      if (!map[m]) map[m] = { month: m, orders: 0, sales: 0, discount: 0, free: 0, customers: new Set() };
+      const row = map[m];
+      row.orders += 1;
+      row.sales += o.grandTotal;
+      row.discount += (o.productDiscount || 0) + (o.discount || 0);
+      row.free += o.items.reduce((sum, it) => sum + (it.freeQty || 0), 0);
+      row.customers.add(o.customerId);
+    });
+    return Object.values(map).sort((a, b) => b.month.localeCompare(a.month));
+  }
+
+  renderMonthPicker(isBN: boolean): string {
+    const rows = this.monthSummaries();
+    const sel = this.selectedMonth;
+    const money = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+    const total = rows.reduce((a, r) => ({ orders: a.orders + r.orders, sales: a.sales + r.sales, discount: a.discount + r.discount, free: a.free + r.free }), { orders: 0, sales: 0, discount: 0, free: 0 });
+    return `
+      <div class="p-4 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 class="font-extrabold text-sm sm:text-base text-slate-900 dark:text-white flex items-center gap-2">
+              <i data-lucide="calendar-range" class="w-5 h-5 text-brand-600"></i>
+              <span>${isBN ? 'মাস অনুযায়ী বিক্রয় রিপোর্ট' : 'Monthly sales report'}</span>
+            </h3>
+            <p class="text-xs text-slate-500">${isBN ? 'নিচের সব রিপোর্ট ও Excel এক্সপোর্ট বাছাই করা মাসের জন্য' : 'All reports and Excel exports below follow the selected month'}</p>
+          </div>
+          <select id="reportMonthSelect" onchange="window.ReportActions.setMonth(this.value)" class="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold text-slate-900 dark:text-white">
+            ${rows.map(r => `<option value="${r.month}" ${sel === r.month ? 'selected' : ''}>${this.monthLabel(r.month)}</option>`).join('')}
+            <option value="all" ${sel === 'all' ? 'selected' : ''}>${this.monthLabel('all')}</option>
+          </select>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-xs min-w-[520px]">
+            <thead>
+              <tr class="text-left font-bold text-slate-400 uppercase border-b border-slate-200 dark:border-slate-800">
+                <th class="py-2">${isBN ? 'মাস' : 'Month'}</th>
+                <th class="py-2 text-right">${isBN ? 'অর্ডার' : 'Orders'}</th>
+                <th class="py-2 text-right">${isBN ? 'কাস্টমার' : 'Customers'}</th>
+                <th class="py-2 text-right">${isBN ? 'বিক্রয় (৳)' : 'Sales (৳)'}</th>
+                <th class="py-2 text-right">${isBN ? 'ছাড় (৳)' : 'Discounts (৳)'}</th>
+                <th class="py-2 text-right">${isBN ? 'ফ্রি ইউনিট' : 'Free units'}</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+              ${rows.map(r => `
+                <tr onclick="window.ReportActions.setMonth('${r.month}')" class="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 ${sel === r.month ? 'bg-brand-50 dark:bg-brand-950/40 font-bold' : ''}">
+                  <td class="py-2 text-slate-900 dark:text-white">${this.monthLabel(r.month)}</td>
+                  <td class="py-2 text-right">${r.orders}</td>
+                  <td class="py-2 text-right">${r.customers.size}</td>
+                  <td class="py-2 text-right font-black text-brand-700 dark:text-brand-400">৳${money(r.sales)}</td>
+                  <td class="py-2 text-right text-rose-500">${r.discount > 0 ? '৳' + money(r.discount) : '-'}</td>
+                  <td class="py-2 text-right text-tealbrand-600">${r.free > 0 ? r.free : '-'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+            <tfoot>
+              <tr class="border-t-2 border-slate-200 dark:border-slate-700 font-black text-slate-900 dark:text-white">
+                <td class="py-2">${isBN ? 'সর্বমোট' : 'Total'}</td>
+                <td class="py-2 text-right">${total.orders}</td>
+                <td class="py-2"></td>
+                <td class="py-2 text-right text-brand-700 dark:text-brand-400">৳${money(total.sales)}</td>
+                <td class="py-2 text-right text-rose-500">${total.discount > 0 ? '৳' + money(total.discount) : '-'}</td>
+                <td class="py-2 text-right text-tealbrand-600">${total.free > 0 ? total.free : '-'}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    `;
+  }
+
   renderReportsSection(): string {
     const isSR = store.authSession.role !== 'admin';
     const currentSr = store.authSession.user;
     const currentSrId = currentSr?.id || 'SR01';
 
     // Filter data: An SR only sees their own orders & assigned customers! Admin sees all.
-    const orders = isSR 
-      ? store.db.orders.filter(o => o.srId === currentSrId) 
-      : store.db.orders;
+    const orders = this.monthOrders();
 
     const customers = isSR
       ? store.db.customers.filter(c => (c.assignedSrId || c.createdBy) === currentSrId)
@@ -27,7 +131,7 @@ export class ReportModule {
 
     // 1. SR-wise aggregation (For Admin comparative view or SR target card)
     const srReportList = srs.map(sr => {
-      const srOrders = store.db.orders.filter(o => o.srId === sr.id);
+      const srOrders = orders.filter(o => o.srId === sr.id);
       const totalAmount = srOrders.reduce((acc, o) => acc + o.grandTotal, 0);
       const totalItems = srOrders.reduce((acc, o) => acc + o.items.reduce((s, it) => s + it.qty, 0), 0);
       const target = sr.target || 350000;
@@ -125,6 +229,8 @@ export class ReportModule {
     return `
       <div class="space-y-6">
         
+        ${this.renderMonthPicker(isBN)}
+
         <!-- Header Banner -->
         <div class="p-6 rounded-3xl ${isSR ? 'bg-gradient-to-r from-brand-900 via-brand-850 to-tealbrand-900' : 'bg-gradient-to-r from-slate-900 via-brand-950 to-slate-900'} text-white shadow-xl border border-brand-800/40">
           <div class="flex flex-wrap items-center justify-between gap-4">
@@ -690,7 +796,7 @@ export class ReportModule {
     const XLSX = (window as any).XLSX;
     if (!XLSX) return;
 
-    const orders = store.db.orders;
+    const orders = this.monthOrders();
     const rows = store.getReportSrList().map(sr => {
       const srOrders = orders.filter(o => o.srId === sr.id);
       const totalAmount = srOrders.reduce((acc, o) => acc + o.grandTotal, 0);
@@ -714,7 +820,7 @@ export class ReportModule {
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "SR_Wise_Sales");
-    XLSX.writeFile(wb, `BH_Agro_SR_Wise_Sales_${new Date().toISOString().split('T')[0]}.xlsx`);
+    XLSX.writeFile(wb, `BH_Agro_SR_Wise_Sales_${this.selectedMonth}.xlsx`);
     showToast("SR-wise sales report exported to Excel!");
   }
 
@@ -725,9 +831,7 @@ export class ReportModule {
     const isSR = store.authSession.role !== 'admin';
     const currentSrId = store.authSession.user?.id || 'SR01';
 
-    const orders = isSR 
-      ? store.db.orders.filter(o => o.srId === currentSrId) 
-      : store.db.orders;
+    const orders = this.monthOrders();
 
     const customers = isSR
       ? store.db.customers.filter(c => (c.assignedSrId || c.createdBy) === currentSrId)
@@ -763,8 +867,8 @@ export class ReportModule {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Customer_Wise_Sales");
     const filename = isSR 
-      ? `BH_Agro_Customer_Wise_Sales_${currentSrId}_${new Date().toISOString().split('T')[0]}.xlsx`
-      : `BH_Agro_Customer_Wise_Sales_${new Date().toISOString().split('T')[0]}.xlsx`;
+      ? `BH_Agro_Customer_Wise_Sales_${currentSrId}_${this.selectedMonth}.xlsx`
+      : `BH_Agro_Customer_Wise_Sales_${this.selectedMonth}.xlsx`;
     XLSX.writeFile(wb, filename);
     showToast("Customer-wise sales report exported to Excel!");
   }
@@ -776,9 +880,7 @@ export class ReportModule {
     const isSR = store.authSession.role !== 'admin';
     const currentSrId = store.authSession.user?.id || 'SR01';
 
-    const orders = isSR 
-      ? store.db.orders.filter(o => o.srId === currentSrId) 
-      : store.db.orders;
+    const orders = this.monthOrders();
 
     const rows = orders.map(o => ({
       'Order ID': o.id,
@@ -798,8 +900,8 @@ export class ReportModule {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Daywise_Sales");
     const filename = isSR 
-      ? `BH_Agro_Daywise_Sales_${currentSrId}_${new Date().toISOString().split('T')[0]}.xlsx`
-      : `BH_Agro_Daywise_Sales_${new Date().toISOString().split('T')[0]}.xlsx`;
+      ? `BH_Agro_Daywise_Sales_${currentSrId}_${this.selectedMonth}.xlsx`
+      : `BH_Agro_Daywise_Sales_${this.selectedMonth}.xlsx`;
     XLSX.writeFile(wb, filename);
     showToast("Day-wise sales exported to Excel!");
   }
@@ -811,9 +913,7 @@ export class ReportModule {
     const isSR = store.authSession.role !== 'admin';
     const currentSrId = store.authSession.user?.id || 'SR01';
 
-    const orders = isSR 
-      ? store.db.orders.filter(o => o.srId === currentSrId) 
-      : store.db.orders;
+    const orders = this.monthOrders();
 
     const prodMap: Record<string, any> = {};
     orders.forEach(o => {
@@ -829,8 +929,8 @@ export class ReportModule {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Product_Sales");
     const filename = isSR 
-      ? `BH_Agro_Product_Sales_${currentSrId}_${new Date().toISOString().split('T')[0]}.xlsx`
-      : `BH_Agro_Product_Sales_${new Date().toISOString().split('T')[0]}.xlsx`;
+      ? `BH_Agro_Product_Sales_${currentSrId}_${this.selectedMonth}.xlsx`
+      : `BH_Agro_Product_Sales_${this.selectedMonth}.xlsx`;
     XLSX.writeFile(wb, filename);
     showToast("Product sales exported to Excel!");
   }

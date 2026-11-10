@@ -4,6 +4,7 @@
  * Add New Product Modal, and Price & Discount Manager
  */
 
+import { getDiscountPct, calcAdp, getFreeTiers, formatTiers } from './pricing.ts';
 import { store, Product } from './store.ts';
 
 export class ProductModule {
@@ -11,21 +12,33 @@ export class ProductModule {
     const isLow = p.stock > 0 && p.stock < 10;
     const isOut = p.stock <= 0;
     const isBn = store.lang === 'bn';
+    const disc = getDiscountPct(p);
+    const adp = calcAdp(p);
+    const tiers = getFreeTiers(p);
+    const money = (n: number) => (n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
 
     // তালিকা (list) আকারে একটি সারি: বামে তথ্য, ডানে বুক বাটন
     return `
       <div class="product-item-card flex items-center gap-3 p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:border-brand-500/40 transition" data-name="${(p.name || '').toLowerCase()} ${(p.bnName || '').toLowerCase()}" data-sku="${(p.sku || '').toLowerCase()}" data-cat="${p.category}" data-stock="${p.stock}">
         <div class="min-w-0 flex-1">
           <h4 class="font-extrabold text-sm text-slate-900 dark:text-white leading-tight">${isBn ? (p.bnName || p.name) : p.name}</h4>
-          <p class="text-[11px] text-slate-500 mt-0.5">${p.packSize} • <span class="font-mono">${p.sku}</span> • ${store.t(p.category) || p.category}</p>
-          <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
-            <span class="text-sm font-black text-brand-700 dark:text-brand-400">৳${p.tradePrice}</span>
-            <span class="text-slate-400 line-through">MRP ৳${p.mrp}</span>
-            ${p.tradeOffer ? `<span class="font-bold text-tealbrand-700 dark:text-tealbrand-400">${p.tradeOffer}</span>` : ''}
+          <p class="text-xs text-slate-500 mt-0.5">${p.packSize} • <span class="font-mono">${p.sku}</span> • ${store.t(p.category) || p.category}</p>
+          <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+            <span class="text-sm font-black text-brand-700 dark:text-brand-400">৳${money(adp)}</span>
+            ${disc > 0 ? `
+              <span class="text-slate-400 line-through">৳${money(p.tradePrice)}</span>
+              <span class="px-1.5 py-0.5 rounded bg-rose-50 dark:bg-rose-950/40 text-rose-600 font-bold">-${disc}%</span>
+            ` : ''}
+            <span class="text-slate-400">MRP ৳${money(p.mrp)}</span>
             <span class="font-bold ${isOut ? 'text-rose-600' : (isLow ? 'text-amber-600' : 'text-slate-500')}">
               ${isOut ? (isBn ? 'স্টক শেষ' : 'Out of Stock') : (isLow ? (isBn ? `স্বল্প স্টক: ${p.stock}` : `Low Stock: ${p.stock}`) : (isBn ? `মজুদ: ${p.stock}` : `Stock: ${p.stock}`))}
             </span>
           </div>
+          ${tiers.length ? `
+            <div class="mt-1 inline-block px-2 py-0.5 rounded-lg bg-tealbrand-50 dark:bg-tealbrand-950/40 text-tealbrand-700 dark:text-tealbrand-400 text-[11px] font-bold">
+              ${isBn ? 'ফ্রি অফার' : 'Free offer'}: ${formatTiers(tiers)}
+            </div>
+          ` : ''}
         </div>
         <div class="shrink-0">
           ${isOut ? '' : `
@@ -207,6 +220,9 @@ export class ProductModule {
   // Admin View: Price and Discount Manager
   renderPriceAndDiscountManager(): string {
     const products = store.db.products;
+    const isBn = store.lang === 'bn';
+    const money = (n: number) => (n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
+    const inputCls = 'px-2 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold text-slate-900 dark:text-white';
 
     return `
       <div class="space-y-6">
@@ -216,26 +232,35 @@ export class ProductModule {
               <i data-lucide="tags" class="w-6 h-6 text-brand-600"></i>
               <span>${store.t('pricingManager')}</span>
             </h2>
-            <p class="text-xs text-slate-500">Manage Trade Price (TP), M.R.P., and Trade Offers across all veterinary medicines.</p>
+            <p class="text-xs text-slate-500">${isBn
+              ? 'প্রতিটা প্রোডাক্টের TP, MRP, ছাড় (%), ADP ও ফ্রি অফার এখান থেকে ঠিক করুন'
+              : 'Manage TP, MRP, discount %, ADP and free-product offers for every medicine.'}</p>
           </div>
           <button onclick="window.ProductActions.openAddModal()" class="px-4 py-2 bg-brand-600 text-white rounded-xl text-xs font-bold shadow hover:bg-brand-500 transition">
-            + Add New Product
+            + ${isBn ? 'নতুন প্রোডাক্ট' : 'Add New Product'}
           </button>
         </div>
 
-        <!-- Bulk Discount / Offer Manager Card -->
+        <!-- নিয়মের সারাংশ -->
+        <div class="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 text-xs text-amber-900 dark:text-amber-200 space-y-1">
+          <div><b>${isBn ? 'ছাড় (%):' : 'Discount %:'}</b> ${isBn ? 'শুধু দাম দেওয়া ইউনিটে। ADP = TP − ছাড়। লাইন মোট = পরিমাণ × ADP।' : 'Applies to paid units only. ADP = TP − discount. Line total = qty × ADP.'}</div>
+          <div><b>${isBn ? 'ফ্রি অফার:' : 'Free offer:'}</b> ${isBn
+            ? 'লিখুন "১০+১, ২০+৩, ৩০+৫" (কত কিনলে + কত ফ্রি)। ক্রেতা যে সর্বোচ্চ ধাপে পৌঁছায় শুধু সেটাই পায়। ফাঁকা রাখলে ফ্রি নেই।'
+            : 'Type "10+1, 20+3, 30+5" (buy + free). The customer gets only the highest tier reached. Leave empty for no free offer.'}</div>
+          <div>${isBn ? 'পরিবর্তন শুধু নতুন অর্ডারে কাজ করে; পুরনো ইনভয়েস অপরিবর্তিত থাকে।' : 'Changes apply to new orders only; old invoices stay unchanged.'}</div>
+        </div>
+
+        <!-- Bulk Discount / Free offer by category -->
         <div class="p-5 rounded-3xl bg-gradient-to-r from-brand-900 via-tealbrand-900 to-slate-900 text-white shadow-lg space-y-4">
           <div class="flex items-center gap-2">
             <i data-lucide="sparkles" class="w-5 h-5 text-amber-300"></i>
-            <h3 class="font-extrabold text-sm sm:text-base">Bulk Category Offer & Price Updater</h3>
+            <h3 class="font-extrabold text-sm sm:text-base">${isBn ? 'ক্যাটাগরি ধরে একসাথে বদলান' : 'Bulk update by category'}</h3>
           </div>
-          <p class="text-xs text-slate-300">Quickly apply promotional trade offers or percentage discounts to an entire product category.</p>
-
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs pt-1">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
             <div>
-              <label class="block font-bold text-slate-200 mb-1">Target Category</label>
+              <label class="block font-bold text-slate-200 mb-1">${isBn ? 'ক্যাটাগরি' : 'Category'}</label>
               <select id="bulkCategorySelect" class="w-full px-3 py-2 rounded-xl bg-slate-800 text-white border border-slate-700 font-bold">
-                <option value="all">All Categories</option>
+                <option value="all">${isBn ? 'সব ক্যাটাগরি' : 'All Categories'}</option>
                 <option value="antibiotics">Antibiotics</option>
                 <option value="vaccines">Vaccines</option>
                 <option value="supplements">Feed Supplements</option>
@@ -243,81 +268,70 @@ export class ProductModule {
               </select>
             </div>
             <div>
-              <label class="block font-bold text-slate-200 mb-1">Trade Offer Preset</label>
-              <input type="text" id="bulkOfferPreset" placeholder="e.g. 10+1 Free or 5% Cash Discount" class="w-full px-3 py-2 rounded-xl bg-slate-800 text-white border border-slate-700" />
+              <label class="block font-bold text-slate-200 mb-1">${isBn ? 'ছাড় (%)' : 'Discount (%)'}</label>
+              <div class="flex gap-2">
+                <input type="number" min="0" max="100" step="0.5" id="bulkDiscountInput" placeholder="5" class="w-full px-3 py-2 rounded-xl bg-slate-800 text-white border border-slate-700" />
+                <button onclick="window.ProductActions.applyBulkDiscount()" class="px-3 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-900 font-extrabold whitespace-nowrap">${isBn ? 'প্রয়োগ' : 'Apply'}</button>
+              </div>
             </div>
-            <div class="flex items-end">
-              <button onclick="window.ProductActions.applyBulkOffer()" class="w-full py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-900 font-extrabold text-xs shadow transition active:scale-95">
-                Apply to Selected Category
-              </button>
+            <div>
+              <label class="block font-bold text-slate-200 mb-1">${isBn ? 'ফ্রি অফার (যেমন 10+1, 20+3)' : 'Free offer (e.g. 10+1, 20+3)'}</label>
+              <div class="flex gap-2">
+                <input type="text" id="bulkFreeInput" placeholder="10+1, 20+3" class="w-full px-3 py-2 rounded-xl bg-slate-800 text-white border border-slate-700" />
+                <button onclick="window.ProductActions.applyBulkFree()" class="px-3 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-900 font-extrabold whitespace-nowrap">${isBn ? 'প্রয়োগ' : 'Apply'}</button>
+              </div>
+              <button onclick="window.ProductActions.clearBulkFree()" class="mt-1.5 text-[11px] text-slate-300 underline">${isBn ? 'এই ক্যাটাগরির ফ্রি অফার মুছুন' : 'Remove free offers of this category'}</button>
             </div>
           </div>
         </div>
 
         <!-- Live Price & Discount Interactive Table -->
         <div class="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-          <div class="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h3 class="font-extrabold text-base text-slate-900 dark:text-white">Individual Product Price & Offer Editor</h3>
-              <p class="text-xs text-slate-500 font-medium">Click "Save" on any row to instantly update price & sync to Firebase</p>
-            </div>
+          <div>
+            <h3 class="font-extrabold text-base text-slate-900 dark:text-white">${isBn ? 'প্রোডাক্টভিত্তিক দাম, ছাড় ও ফ্রি অফার' : 'Individual Product Price, Discount & Free Offer'}</h3>
+            <p class="text-xs text-slate-500 font-medium">${isBn ? 'যেকোনো সারিতে "সেভ" চাপলে সাথে সাথে আপডেট ও সিঙ্ক হবে' : 'Click "Save" on any row to update and sync instantly'}</p>
           </div>
 
-          <!-- Price Manager Search Input -->
           <div class="relative">
             <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3.5 top-3"></i>
-            <input 
-              type="text" 
-              id="priceManagerSearchInput"
-              placeholder="ওষুধের নাম, SKU বা ক্যাটাগরি দিয়ে মূল্য তালিকায় খুঁজুন..." 
-              autocomplete="off"
-              class="w-full pl-10 pr-10 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 focus:bg-white dark:focus:bg-slate-900 focus:ring-2 focus:ring-brand-500 transition" 
-            />
+            <input type="text" id="priceManagerSearchInput" placeholder="${isBn ? 'প্রোডাক্টের নাম বা SKU লিখে খুঁজুন...' : 'Search by product name or SKU...'}" autocomplete="off"
+              class="w-full pl-10 pr-10 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 focus:bg-white dark:focus:bg-slate-900 focus:ring-2 focus:ring-brand-500 focus:outline-none" />
             <button id="clearPriceSearchBtn" class="hidden absolute right-3 top-2.5 text-slate-400 hover:text-slate-600">
               <i data-lucide="x" class="w-4 h-4"></i>
             </button>
           </div>
 
           <div class="overflow-x-auto">
-            <table class="w-full text-left text-xs">
+            <table class="w-full text-left text-xs min-w-[860px]">
               <thead>
                 <tr class="border-b border-slate-200 dark:border-slate-800 font-bold text-slate-400 uppercase">
                   <th class="pb-3">SKU</th>
-                  <th class="pb-3">Medicine Description</th>
-                  <th class="pb-3">Category</th>
-                  <th class="pb-3 w-28">Trade Price (৳)</th>
-                  <th class="pb-3 w-28">M.R.P. (৳)</th>
-                  <th class="pb-3 w-48">Trade Offer / Discount</th>
-                  <th class="pb-3 text-right">Action</th>
+                  <th class="pb-3">${isBn ? 'প্রোডাক্ট' : 'Medicine'}</th>
+                  <th class="pb-3 w-24">TP (৳)</th>
+                  <th class="pb-3 w-24">MRP (৳)</th>
+                  <th class="pb-3 w-20">${isBn ? 'ছাড় %' : 'Disc %'}</th>
+                  <th class="pb-3 w-24">ADP (৳)</th>
+                  <th class="pb-3 w-44">${isBn ? 'ফ্রি অফার' : 'Free offer'}</th>
+                  <th class="pb-3 text-right"></th>
                 </tr>
               </thead>
               <tbody id="priceManagerTableBody" class="divide-y divide-slate-100 dark:divide-slate-800">
                 ${products.map(p => `
-                  <tr 
-                    class="price-editor-row hover:bg-slate-50/50 dark:hover:bg-slate-800/40" 
-                    id="priceRow-${p.id}"
-                    data-name="${(p.name || '').toLowerCase()}"
-                    data-sku="${(p.sku || '').toLowerCase()}"
-                    data-cat="${p.category.toLowerCase()}"
-                  >
+                  <tr class="price-editor-row hover:bg-slate-50/50 dark:hover:bg-slate-800/40" id="priceRow-${p.id}"
+                    data-name="${(p.name || '').toLowerCase()}" data-sku="${(p.sku || '').toLowerCase()}" data-cat="${p.category.toLowerCase()}">
                     <td class="py-3 font-mono font-bold text-slate-400">${p.sku}</td>
                     <td class="py-3">
                       <div class="font-bold text-slate-900 dark:text-white">${p.name}</div>
-                      <div class="text-[11px] text-slate-400">${p.packSize}</div>
+                      <div class="text-[11px] text-slate-400">${p.packSize} • <span class="capitalize">${p.category}</span></div>
                     </td>
-                    <td class="py-3 capitalize">${p.category}</td>
-                    <td class="py-3">
-                      <input type="number" min="1" id="tpInput-${p.id}" value="${p.tradePrice}" class="w-24 px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-black text-brand-700 dark:text-brand-400 text-xs" />
-                    </td>
-                    <td class="py-3">
-                      <input type="number" min="1" id="mrpInput-${p.id}" value="${p.mrp}" class="w-24 px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold text-slate-700 dark:text-slate-300 text-xs" />
-                    </td>
-                    <td class="py-3">
-                      <input type="text" id="offerInput-${p.id}" value="${p.tradeOffer || 'Standard'}" class="w-44 px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-semibold text-tealbrand-700 dark:text-tealbrand-400 text-xs" />
-                    </td>
+                    <td class="py-3"><input type="number" min="0" step="0.01" id="tpInput-${p.id}" value="${p.tradePrice}" oninput="window.ProductActions.previewAdp('${p.id}')" class="w-20 ${inputCls}" /></td>
+                    <td class="py-3"><input type="number" min="0" step="0.01" id="mrpInput-${p.id}" value="${p.mrp}" class="w-20 ${inputCls}" /></td>
+                    <td class="py-3"><input type="number" min="0" max="100" step="0.5" id="discInput-${p.id}" value="${getDiscountPct(p)}" oninput="window.ProductActions.previewAdp('${p.id}')" class="w-16 ${inputCls}" /></td>
+                    <td class="py-3 font-black text-brand-700 dark:text-brand-400" id="adpCell-${p.id}">${money(calcAdp(p))}</td>
+                    <td class="py-3"><input type="text" id="tiersInput-${p.id}" value="${formatTiers(getFreeTiers(p)).replace(/ · /g, ', ')}" placeholder="${isBn ? 'ফ্রি নেই' : 'none'}" class="w-40 ${inputCls}" /></td>
                     <td class="py-3 text-right">
                       <button onclick="window.ProductActions.saveRowPrice('${p.id}')" class="px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-500 text-white font-bold text-[11px] shadow-sm transition active:scale-95">
-                        Save
+                        ${isBn ? 'সেভ' : 'Save'}
                       </button>
                     </td>
                   </tr>

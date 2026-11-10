@@ -4,6 +4,7 @@
  * Admin actions: Print Invoice & Delete Order
  */
 
+import { priceLine, nextTierHint, getFreeTiers, formatTiers, unitsNeeded } from './pricing.ts';
 import { store, Order, OrderItem } from './store.ts';
 
 export class OrderModule {
@@ -308,6 +309,11 @@ export class OrderModule {
     });
   }
 
+  /** টাকার সংখ্যা: পূর্ণ হলে ১,২৩৪; দশমিক থাকলে সর্বোচ্চ ২ ঘর */
+  money(n: number): string {
+    return (n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
+  }
+
   renderCatalogRows(): string {
     const isBn = store.lang === 'bn';
     const products = this.getFilteredProducts();
@@ -319,19 +325,30 @@ export class OrderModule {
       const qty = cartItem ? cartItem.qty : 0;
       const isOut = p.stock <= 0;
       const isLow = p.stock > 0 && p.stock < 10;
+      const line = priceLine(p, 1);
+      const tiers = getFreeTiers(p);
+      const canInc = store.canOrderQty(p, qty + 1);
       return `
         <div class="flex items-center gap-3 p-3 rounded-2xl bg-white dark:bg-slate-900 border ${qty > 0 ? 'border-brand-500 ring-2 ring-brand-500/20' : 'border-slate-200 dark:border-slate-800'} shadow-sm">
           <div class="min-w-0 flex-1">
             <h4 class="font-extrabold text-sm text-slate-900 dark:text-white leading-tight">${isBn ? (p.bnName || p.name) : p.name}</h4>
-            <p class="text-[11px] text-slate-500 mt-0.5">${p.packSize} • <span class="font-mono">${p.sku}</span></p>
-            <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
-              <span class="text-sm font-black text-brand-700 dark:text-brand-400">৳${p.tradePrice}</span>
-              <span class="text-slate-400 line-through">MRP ৳${p.mrp}</span>
-              ${p.tradeOffer ? `<span class="font-bold text-tealbrand-700 dark:text-tealbrand-400">${p.tradeOffer}</span>` : ''}
+            <p class="text-xs text-slate-500 mt-0.5">${p.packSize} • <span class="font-mono">${p.sku}</span></p>
+            <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+              <span class="text-sm font-black text-brand-700 dark:text-brand-400">৳${this.money(line.adp)}</span>
+              ${line.discountPct > 0 ? `
+                <span class="text-slate-400 line-through">৳${this.money(p.tradePrice)}</span>
+                <span class="px-1.5 py-0.5 rounded bg-rose-50 dark:bg-rose-950/40 text-rose-600 font-bold">-${line.discountPct}%</span>
+              ` : ''}
+              <span class="text-slate-400">MRP ৳${this.money(p.mrp)}</span>
               <span class="font-bold ${isOut ? 'text-rose-600' : (isLow ? 'text-amber-600' : 'text-slate-500')}">
                 ${isOut ? (isBn ? 'স্টক শেষ' : 'Out of Stock') : (isLow ? (isBn ? `স্বল্প: ${p.stock}` : `Low: ${p.stock}`) : (isBn ? `মজুদ: ${p.stock}` : `Stock: ${p.stock}`))}
               </span>
             </div>
+            ${tiers.length ? `
+              <div class="mt-1 inline-block px-2 py-0.5 rounded-lg bg-tealbrand-50 dark:bg-tealbrand-950/40 text-tealbrand-700 dark:text-tealbrand-400 text-[11px] font-bold">
+                ${isBn ? 'ফ্রি অফার' : 'Free offer'}: ${formatTiers(tiers)}
+              </div>
+            ` : ''}
           </div>
           <div class="shrink-0">
             ${isOut ? '' : (qty === 0 ? `
@@ -341,14 +358,15 @@ export class OrderModule {
               </button>
             ` : `
               <div class="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 rounded-xl p-1">
-                <button onclick="window.OrderActions.updateQty('${p.id}', ${qty - 1})" class="w-8 h-8 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white flex items-center justify-center">
+                <button onclick="window.OrderActions.updateQty('${p.id}', ${qty - 1})" class="w-9 h-9 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white flex items-center justify-center">
                   <i data-lucide="${qty === 1 ? 'trash-2' : 'minus'}" class="w-3.5 h-3.5"></i>
                 </button>
-                <span class="text-xs font-black min-w-[22px] text-center">${qty}</span>
-                <button onclick="window.OrderActions.updateQty('${p.id}', ${qty + 1})" class="w-8 h-8 rounded-lg bg-brand-600 text-white flex items-center justify-center">
+                <span class="text-xs font-black min-w-[24px] text-center">${qty}</span>
+                <button onclick="window.OrderActions.updateQty('${p.id}', ${qty + 1})" class="w-9 h-9 rounded-lg ${canInc ? 'bg-brand-600 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-400'} flex items-center justify-center">
                   <i data-lucide="plus" class="w-3.5 h-3.5"></i>
                 </button>
               </div>
+              ${canInc ? '' : `<div class="text-[10px] text-amber-600 font-bold text-center mt-0.5">${isBn ? 'স্টক সীমা' : 'Stock limit'}</div>`}
             `)}
           </div>
         </div>
@@ -368,27 +386,36 @@ export class OrderModule {
       `;
     }
     return `
-      <div class="space-y-2 max-h-[280px] overflow-y-auto pr-1">
+      <div class="space-y-2 max-h-[300px] overflow-y-auto pr-1">
         ${keys.map(k => {
           const it = store.cart.items[k];
+          const p = it.product;
+          const hint = nextTierHint(p, it.qty);
+          const showHint = hint && store.canOrderQty(p, it.qty + hint.more);
+          const canInc = store.canOrderQty(p, it.qty + 1);
           return `
-            <div class="flex items-center gap-2 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 text-xs">
-              <div class="min-w-0 flex-1">
-                <div class="font-bold text-slate-800 dark:text-slate-100 truncate">${isBn ? (it.product.bnName || it.product.name) : it.product.name}</div>
-                <div class="text-[11px] text-slate-500">
-                  ${it.qty} × ৳${it.product.tradePrice}
-                  ${it.freeQty > 0 ? `<span class="text-tealbrand-600 font-bold"> +${it.freeQty} ${isBn ? 'ফ্রি' : 'Free'}</span>` : ''}
+            <div class="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 text-xs">
+              <div class="flex items-center gap-2">
+                <div class="min-w-0 flex-1">
+                  <div class="font-bold text-slate-800 dark:text-slate-100 truncate">${isBn ? (p.bnName || p.name) : p.name}</div>
+                  <div class="text-xs text-slate-500">
+                    ${it.qty} × ৳${this.money(it.adp)}
+                    ${it.discountPct > 0 ? `<span class="text-slate-400 line-through">৳${this.money(p.tradePrice)}</span> <span class="text-rose-500 font-bold">-${it.discountPct}%</span>` : ''}
+                    ${it.freeQty > 0 ? `<span class="text-tealbrand-600 font-bold"> +${it.freeQty} ${isBn ? 'ফ্রি' : 'Free'}</span>` : ''}
+                  </div>
+                </div>
+                <div class="font-black text-slate-800 dark:text-slate-100">৳${it.total.toLocaleString()}</div>
+                <div class="flex items-center gap-1">
+                  <button onclick="window.OrderActions.updateQty('${p.id}', ${it.qty - 1})" class="w-8 h-8 rounded-lg bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 flex items-center justify-center">
+                    <i data-lucide="${it.qty === 1 ? 'trash-2' : 'minus'}" class="w-3 h-3"></i>
+                  </button>
+                  <button onclick="window.OrderActions.updateQty('${p.id}', ${it.qty + 1})" class="w-8 h-8 rounded-lg ${canInc ? 'bg-brand-600 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-400'} flex items-center justify-center">
+                    <i data-lucide="plus" class="w-3 h-3"></i>
+                  </button>
                 </div>
               </div>
-              <div class="font-black text-slate-800 dark:text-slate-100">৳${it.total.toLocaleString()}</div>
-              <div class="flex items-center gap-1">
-                <button onclick="window.OrderActions.updateQty('${it.product.id}', ${it.qty - 1})" class="w-7 h-7 rounded-lg bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 flex items-center justify-center">
-                  <i data-lucide="${it.qty === 1 ? 'trash-2' : 'minus'}" class="w-3 h-3"></i>
-                </button>
-                <button onclick="window.OrderActions.updateQty('${it.product.id}', ${it.qty + 1})" class="w-7 h-7 rounded-lg bg-brand-600 text-white flex items-center justify-center">
-                  <i data-lucide="plus" class="w-3 h-3"></i>
-                </button>
-              </div>
+              ${showHint ? `<div class="mt-1 text-[11px] font-bold text-amber-600">${isBn ? `আর ${hint!.more}টি নিলে ${hint!.free}টি ফ্রি` : `Add ${hint!.more} more to get ${hint!.free} free`}</div>` : ''}
+              ${!canInc ? `<div class="mt-1 text-[11px] font-bold text-amber-600">${isBn ? `স্টকের কারণে আর বাড়ানো যাবে না (আছে ${p.stock}টি)` : `Stock limit reached (${p.stock} in stock)`}</div>` : ''}
             </div>
           `;
         }).join('')}
@@ -398,32 +425,34 @@ export class OrderModule {
 
   renderSlipTotals(): string {
     const isBn = store.lang === 'bn';
-    const keys = Object.keys(store.cart.items);
-    if (keys.length === 0) return '';
-    let subtotal = 0;
-    let totalFree = 0;
-    keys.forEach(k => {
-      subtotal += store.cart.items[k].total;
-      totalFree += store.cart.items[k].freeQty || 0;
-    });
-    const discount = Number(store.cart.discount) || 0;
-    const grandTotal = Math.max(0, subtotal - discount);
+    const t = this.getCartTotals();
+    if (t.count === 0) return '';
     return `
       <div class="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-1.5 text-xs">
-        <div class="flex justify-between text-slate-500">
-          <span>${store.t('subtotal')}</span>
-          <span>৳${subtotal.toLocaleString()}</span>
-        </div>
-        ${totalFree > 0 ? `
-          <div class="flex justify-between text-tealbrand-600 font-bold">
-            <span>${store.t('freeQty')}</span>
-            <span>${totalFree} ${isBn ? 'টি ফ্রি' : 'units free'}</span>
+        ${t.productDiscount > 0 ? `
+          <div class="flex justify-between text-slate-500">
+            <span>${isBn ? 'TP অনুযায়ী মোট' : 'Total at TP'}</span>
+            <span>৳${t.tpSubtotal.toLocaleString()}</span>
+          </div>
+          <div class="flex justify-between text-rose-500 font-bold">
+            <span>${isBn ? 'প্রোডাক্ট ছাড়' : 'Product discount'}</span>
+            <span>-৳${t.productDiscount.toLocaleString()}</span>
           </div>
         ` : ''}
-        ${discount > 0 ? `
+        <div class="flex justify-between text-slate-600 dark:text-slate-300 font-bold">
+          <span>${store.t('subtotal')}${t.productDiscount > 0 ? ' (ADP)' : ''}</span>
+          <span>৳${t.subtotal.toLocaleString()}</span>
+        </div>
+        ${t.free > 0 ? `
+          <div class="flex justify-between text-tealbrand-600 font-bold">
+            <span>${store.t('freeQty')}</span>
+            <span>${t.free} ${isBn ? 'টি ফ্রি' : 'units free'}</span>
+          </div>
+        ` : ''}
+        ${t.discount > 0 ? `
           <div class="flex justify-between text-rose-500 font-bold">
-            <span>${store.t('discount')}</span>
-            <span>-৳${discount.toLocaleString()}</span>
+            <span>${isBn ? 'স্পেশাল ডিসকাউন্ট' : 'Special discount'}</span>
+            <span>-৳${t.discount.toLocaleString()}</span>
           </div>
         ` : ''}
         <div class="flex justify-between text-slate-500">
@@ -432,7 +461,7 @@ export class OrderModule {
         </div>
         <div class="flex justify-between text-sm sm:text-base font-black text-slate-900 dark:text-white pt-2 border-t border-slate-200 dark:border-slate-700">
           <span>${store.t('grandTotal')}</span>
-          <span class="text-brand-600">৳${grandTotal.toLocaleString()}</span>
+          <span class="text-brand-600">৳${t.grand.toLocaleString()}</span>
         </div>
       </div>
       <button onclick="window.OrderActions.submitOrder()" class="w-full py-3 bg-gradient-to-r from-brand-600 to-tealbrand-600 hover:from-brand-500 hover:to-tealbrand-500 text-white rounded-2xl font-black text-sm flex items-center justify-center gap-2 shadow-md active:scale-95 transition">
@@ -564,10 +593,19 @@ export class OrderModule {
   getCartTotals() {
     const keys = Object.keys(store.cart.items);
     let subtotal = 0;
+    let tpSubtotal = 0;
     let free = 0;
-    keys.forEach(k => { subtotal += store.cart.items[k].total; free += store.cart.items[k].freeQty || 0; });
+    keys.forEach(k => {
+      const it = store.cart.items[k];
+      subtotal += it.total;
+      tpSubtotal += it.qty * it.product.tradePrice;
+      free += it.freeQty || 0;
+    });
     const discount = Number(store.cart.discount) || 0;
-    return { count: keys.length, subtotal, free, discount, grand: Math.max(0, subtotal - discount) };
+    return {
+      count: keys.length, subtotal, tpSubtotal, productDiscount: Math.max(0, tpSubtotal - subtotal),
+      free, discount, grand: Math.max(0, subtotal - discount)
+    };
   }
 
   floatCountText(): string {
@@ -692,20 +730,34 @@ export class OrderModule {
       return;
     }
 
+    // সর্বশেষ প্রোডাক্ট তথ্য (দাম, ছাড়, ফ্রি-ধাপ, স্টক) দিয়ে আবার হিসাব ও স্টক যাচাই
     let subtotal = 0;
-    const items: OrderItem[] = itemKeys.map(k => {
+    let tpSubtotal = 0;
+    const items: OrderItem[] = [];
+    for (const k of itemKeys) {
       const it = store.cart.items[k];
-      subtotal += it.total;
-      return {
-        productId: it.product.id,
-        name: it.product.name,
-        packSize: it.product.packSize,
+      const prod = store.db.products.find(p => p.id === it.product.id) || it.product;
+      if (!store.canOrderQty(prod, it.qty)) {
+        showToast(isBn
+          ? `${prod.bnName || prod.name}: স্টকে কুলাচ্ছে না (ফ্রিসহ ${unitsNeeded(prod, it.qty)}টি লাগবে, আছে ${prod.stock}টি)। পরিমাণ কমান।`
+          : `${prod.name}: not enough stock (${unitsNeeded(prod, it.qty)} needed incl. free, ${prod.stock} available). Reduce quantity.`, 'error');
+        return;
+      }
+      const line = priceLine(prod, it.qty);
+      subtotal += line.total;
+      tpSubtotal += line.tpTotal;
+      items.push({
+        productId: prod.id,
+        name: prod.name,
+        packSize: prod.packSize,
         qty: it.qty,
-        freeQty: it.freeQty || 0,
-        tp: it.product.tradePrice,
-        total: it.total
-      };
-    });
+        freeQty: line.freeQty,
+        tp: prod.tradePrice,
+        discountPct: line.discountPct,
+        adp: line.adp,
+        total: line.total
+      });
+    }
 
     const discount = Number(store.cart.discount) || 0;
     const grandTotal = Math.max(0, subtotal - discount);
@@ -733,6 +785,8 @@ export class OrderModule {
       territory: customer.territory,
       items: items,
       subtotal: subtotal,
+      tpSubtotal: tpSubtotal,
+      productDiscount: Math.max(0, tpSubtotal - subtotal),
       discount: discount,
       grandTotal: grandTotal,
       status: 'confirmed', // Direct confirmation without admin approval!
@@ -744,7 +798,7 @@ export class OrderModule {
     items.forEach(it => {
       const prod = store.db.products.find(p => p.id === it.productId);
       if (prod) {
-        prod.stock = Math.max(0, prod.stock - it.qty);
+        prod.stock = Math.max(0, prod.stock - it.qty - (it.freeQty || 0)); // কেনা + ফ্রি, দুটোই স্টক থেকে
       }
     });
 

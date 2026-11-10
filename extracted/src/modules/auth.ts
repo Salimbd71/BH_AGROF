@@ -89,12 +89,6 @@ export class AuthModule {
                 <span>${isBN ? 'অ্যাডমিন পোর্টালে লগইন করুন' : 'Sign In to Admin Portal'}</span>
               </button>
 
-              <div class="pt-1 text-center">
-                <button type="button" onclick="window.App.openFirebaseModal()" class="text-xs text-purple-700 dark:text-purple-300 font-bold hover:underline inline-flex items-center gap-1.5">
-                  <i data-lucide="database" class="w-3.5 h-3.5 text-purple-600"></i>
-                  <span>${store.t('dbSettings')}</span>
-                </button>
-              </div>
 
               ${!hasAdmins && APP_RULES.canCreateFirstAdmin ? `
                 <div class="p-4 rounded-2xl bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800 text-xs text-purple-900 dark:text-purple-200 space-y-2.5">
@@ -109,10 +103,6 @@ export class AuthModule {
                     <button type="button" onclick="window.AuthActions.openAddAdminModal()" class="flex-1 py-2 px-3 bg-purple-700 hover:bg-purple-600 text-white rounded-xl font-bold text-xs shadow-md flex items-center justify-center gap-1.5 transition">
                       <i data-lucide="shield-plus" class="w-3.5 h-3.5"></i>
                       <span>${store.t('createFirstAdmin')}</span>
-                    </button>
-                    <button type="button" onclick="window.App.openFirebaseModal()" class="flex-1 py-2 px-3 border border-purple-300 dark:border-purple-700 bg-white dark:bg-slate-800 text-purple-800 dark:text-purple-200 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition">
-                      <i data-lucide="database" class="w-3.5 h-3.5"></i>
-                      <span>${store.t('connectFirebase')}</span>
                     </button>
                   </div>
                 </div>
@@ -335,6 +325,9 @@ export class AuthModule {
                 </div>
 
                 <div class="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-2">
+                  <button onclick="window.AuthActions.editSR('${sr.id}')" class="p-1.5 rounded-lg text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-950 text-xs" title="${isBN ? 'এডিট করুন' : 'Edit SR'}">
+                    <i data-lucide="pencil" class="w-4 h-4"></i>
+                  </button>
                   <button onclick="window.AuthActions.deleteSR('${sr.id}')" class="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 text-xs" title="${isBN ? 'এসআর মুছুন' : 'Delete SR'}">
                     <i data-lucide="trash-2" class="w-4 h-4"></i>
                   </button>
@@ -427,56 +420,59 @@ export class AuthModule {
     }
   }
 
-  openAddSRModal(onSaved: () => void) {
-    const nextId = store.getNextSrId();
+  openAddSRModal(onSaved: () => void, editId?: string) {
+    const editing = editId ? store.db.srs.find(x => x.id === editId && !x.deletedAt) : undefined;
+    if (editId && !editing) return;
+    const isBn = store.lang === 'bn';
+    const nextId = editing ? editing.id : store.getNextSrId();
     const modalHtml = `
       <div id="srModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
         <div class="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800">
           <div class="flex items-center justify-between pb-3 border-b">
-            <h3 class="font-extrabold text-base">${store.t('addSR')}</h3>
+            <h3 class="font-extrabold text-base">${editing ? (isBn ? 'এসআর তথ্য এডিট' : 'Edit SR Account') : store.t('addSR')}</h3>
             <button onclick="document.getElementById('srModal').remove()"><i data-lucide="x" class="w-5 h-5"></i></button>
           </div>
           <form id="newSrForm" class="mt-4 space-y-3 text-xs">
             <div class="grid grid-cols-2 gap-3">
               <div>
                 <label class="block font-bold mb-1">${store.t('srStaffId')}</label>
-                <input type="text" id="newSrId" required value="${nextId}" class="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 font-mono font-bold" />
+                <input type="text" id="newSrId" required value="${nextId}" ${editing ? 'readonly' : ''} class="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 font-mono font-bold" />
               </div>
               <div>
                 <label class="block font-bold mb-1">Full Name *</label>
-                <input type="text" id="newSrName" required placeholder="Md. Aminul Islam" class="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold" />
+                <input type="text" id="newSrName" required value="${editing ? editing.name : ''}" placeholder="Md. Aminul Islam" class="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold" />
               </div>
             </div>
 
             <div class="grid grid-cols-2 gap-3">
               <div>
                 <label class="block font-bold mb-1">${store.t('srUsername')} *</label>
-                <input type="text" id="newSrUsername" required placeholder="amin_sr" class="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono font-bold" />
+                <input type="text" id="newSrUsername" required value="${editing ? editing.username : ''}" placeholder="amin_sr" class="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono font-bold" />
               </div>
               <div>
                 <label class="block font-bold mb-1">${store.t('srPassword')} *</label>
-                <input type="text" id="newSrPassword" required value="123" class="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono font-bold" />
+                <input type="text" id="newSrPassword" required value="${editing ? editing.password : '123'}" class="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono font-bold" />
               </div>
             </div>
 
             <div>
               <label class="block font-bold mb-1">Mobile Phone *</label>
-              <input type="tel" id="newSrPhone" required placeholder="017XXXXXXXX" class="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono" />
+              <input type="tel" id="newSrPhone" required value="${editing ? editing.phone : ''}" placeholder="017XXXXXXXX" class="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono" />
             </div>
 
             <div>
               <label class="block font-bold mb-1">Assigned Territory *</label>
-              <input type="text" id="newSrTerritory" required placeholder="Bogura Dairy Zone (শেরপুর)" class="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800" />
+              <input type="text" id="newSrTerritory" required value="${editing ? editing.territory : ''}" placeholder="Bogura Dairy Zone (শেরপুর)" class="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800" />
             </div>
 
             <div>
               <label class="block font-bold mb-1">${store.t('monthlyTarget')}</label>
-              <input type="number" id="newSrTarget" required value="350000" class="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono" />
+              <input type="number" id="newSrTarget" required value="${editing ? editing.target : 350000}" class="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono" />
             </div>
 
             <div class="flex justify-end gap-2 pt-3 border-t">
               <button type="button" onclick="document.getElementById('srModal').remove()" class="px-4 py-2 border rounded-xl">Cancel</button>
-              <button type="submit" class="px-5 py-2 bg-brand-600 text-white font-bold rounded-xl shadow-md">Create SR Account</button>
+              <button type="submit" class="px-5 py-2 bg-brand-600 text-white font-bold rounded-xl shadow-md">${editing ? (isBn ? 'পরিবর্তন সেভ করুন' : 'Save Changes') : 'Create SR Account'}</button>
             </div>
           </form>
         </div>
@@ -497,6 +493,23 @@ export class AuthModule {
         const territory = (document.getElementById('newSrTerritory') as HTMLInputElement).value.trim();
         const target = Number((document.getElementById('newSrTarget') as HTMLInputElement).value) || 300000;
 
+        if (editing) {
+          if (store.getActiveSrs().some(x => x.id !== editing.id && x.username === username)) {
+            showToast(isBn ? 'এই ইউজারনেম অন্য এসআরের আছে!' : 'This username is already taken by another SR!', 'error');
+            return;
+          }
+          editing.name = name;
+          editing.username = username;
+          editing.password = password;
+          editing.phone = phone;
+          editing.territory = territory;
+          editing.target = target;
+          store.saveDatabase();
+          document.getElementById('srModal')?.remove();
+          showToast(isBn ? 'এসআরের তথ্য আপডেট হয়েছে' : 'SR details updated');
+          onSaved();
+          return;
+        }
         if (store.isSrIdUsed(srId)) {
           showToast('This SR ID was already used (or belongs to a deleted SR). Use a new ID.', 'error');
           return;

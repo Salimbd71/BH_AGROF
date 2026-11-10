@@ -14,6 +14,10 @@ export interface Product {
   mrp: number;
   stock: number;
   tradeOffer: string;
+  /** ছাড় % (প্রোডাক্টভেদে, বেশিরভাগে ৫) */
+  discountPct?: number;
+  /** ফ্রি অফারের ধাপ: যেমন [{minQty:10,free:1},{minQty:20,free:2}] */
+  freeTiers?: { minQty: number; free: number }[];
   batchNo: string;
   dosage?: string;
 }
@@ -43,6 +47,9 @@ export interface OrderItem {
   freeQty: number;
   tp: number;
   total: number;
+  /** অর্ডারের সময়ের ছাড় % ও ADP (পরে দাম বদলালেও ইনভয়েস অপরিবর্তিত থাকে) */
+  discountPct?: number;
+  adp?: number;
 }
 
 export interface Order {
@@ -62,6 +69,10 @@ export interface Order {
   status: 'confirmed';
   paymentStatus: string;
   notes?: string;
+  /** TP অনুযায়ী মোট (ছাড়ের আগে) ও প্রোডাক্ট ছাড়ের মোট; subtotal = ADP অনুযায়ী মোট */
+  tpSubtotal?: number;
+  productDiscount?: number;
+  editedAt?: string;
 }
 
 export interface SRUser {
@@ -100,6 +111,7 @@ const CART_STORAGE_KEY = 'bhagro_cart_v1';
 const PENDING_SYNC_KEY = 'bhagro_pending_sync_v1';
 const SYNCED_IDS_KEY = 'bhagro_synced_ids_v1';
 import { APP_RULES, canLoginAs } from '../config/appMode.ts';
+import { calcFreeQty as pricingFreeQty, calcAdp, calcLineTotal, getDiscountPct, unitsNeeded, maxOrderableQty } from './pricing.ts';
 export { FIREBASE_CONFIG_KEY };
 export const PREF_LANG_KEY = 'bioherbs_lang';
 export const PREF_THEME_KEY = 'bioherbs_theme';
@@ -451,7 +463,7 @@ export class Store {
   catalogSearch: string;
   cart: {
     customerId: string;
-    items: Record<string, { product: Product; qty: number; freeQty: number; total: number }>;
+    items: Record<string, { product: Product; qty: number; freeQty: number; total: number; discountPct: number; adp: number }>;
     discount: number;
     notes: string;
   };
@@ -586,17 +598,12 @@ export class Store {
 
 
   // ================= Cart helpers (কার্ট ফোনে সেভ থাকে) =================
-  /** ফ্রি ইউনিট হিসাব (ট্রেড অফার অনুযায়ী) */
+  /** ফ্রি ইউনিট হিসাব (প্রোডাক্টের ফ্রি-ধাপ অনুযায়ী) */
   calcFreeQty(prod: Product, qty: number): number {
-    const offer = prod.tradeOffer || '';
-    if (offer.includes('10+1')) return Math.floor(qty / 10);
-    if (offer.includes('20+2')) return Math.floor(qty / 20) * 2;
-    if (offer.includes('25+3')) return Math.floor(qty / 25) * 3;
-    if (offer.includes('15+1')) return Math.floor(qty / 15);
-    return 0;
+    return pricingFreeQty(prod, qty);
   }
 
-  /** কার্টে প্রোডাক্টের পরিমাণ বসায় (০ হলে সরিয়ে দেয়) */
+  /** কার্টে প্রোডাক্টের পরিমাণ বসায় (০ হলে সরিয়ে দেয়); ছাড়, ADP, ফ্রি ও মোট নিজে হিসাব হয় */
   setCartItem(prod: Product, qty: number) {
     if (qty <= 0) {
       delete this.cart.items[prod.id];
@@ -605,9 +612,20 @@ export class Store {
     this.cart.items[prod.id] = {
       product: prod,
       qty,
-      freeQty: this.calcFreeQty(prod, qty),
-      total: qty * prod.tradePrice
+      freeQty: pricingFreeQty(prod, qty),
+      total: calcLineTotal(prod, qty),
+      discountPct: getDiscountPct(prod),
+      adp: calcAdp(prod)
     };
+  }
+
+  /** এই পরিমাণ স্টকে কুলায় কিনা (কেনা + ফ্রি <= স্টক) */
+  canOrderQty(prod: Product, qty: number): boolean {
+    return unitsNeeded(prod, qty) <= prod.stock;
+  }
+
+  maxQtyForStock(prod: Product): number {
+    return maxOrderableQty(prod);
   }
 
   persistCart() {
@@ -633,7 +651,7 @@ export class Store {
       this.cart = { customerId: saved.customerId || '', items: {}, discount: Number(saved.discount) || 0, notes: saved.notes || '' };
       Object.keys(saved.items || {}).forEach(id => {
         const prod = (this.db.products || []).find(p => p.id === id);
-        const qty = Math.min(Number(saved.items[id]) || 0, prod ? prod.stock : 0);
+        const qty = Math.min(Number(saved.items[id]) || 0, prod ? maxOrderableQty(prod) : 0);
         if (prod && qty > 0) this.setCartItem(prod, qty);
       });
     } catch { /* ignore corrupt cart */ }
@@ -644,7 +662,7 @@ export class Store {
     Object.keys(this.cart.items).forEach(id => {
       const prod = (this.db.products || []).find(p => p.id === id);
       if (!prod || prod.stock <= 0) { delete this.cart.items[id]; return; }
-      this.setCartItem(prod, Math.min(this.cart.items[id].qty, prod.stock));
+      this.setCartItem(prod, Math.min(this.cart.items[id].qty, maxOrderableQty(prod)));
     });
   }
 
@@ -715,7 +733,7 @@ export class Store {
     const products = remote.products.map(p => ({ ...p }));
     newOrders.forEach(o => o.items.forEach(it => {
       const prod = products.find(p => p.id === it.productId);
-      if (prod) prod.stock = Math.max(0, prod.stock - it.qty);
+      if (prod) prod.stock = Math.max(0, prod.stock - it.qty - (it.freeQty || 0)); // কেনা + ফ্রি
     }));
 
     return {

@@ -212,7 +212,9 @@ export function renderSRHeroBanner(): string {
   
   const todayBookingCount = todayOrders.length;
   const todayBookingValue = todayOrders.reduce((acc, o) => acc + o.grandTotal, 0);
-  const totalSalesAchieved = myOrders.reduce((acc, o) => acc + o.grandTotal, 0);
+  // মাসিক টার্গেটের সাথে শুধু চলতি মাসের বিক্রি মেলানো হয় (আগের মাসের বিক্রি যোগ হয় না)
+  const monthKey = todayStr.slice(0, 7);
+  const totalSalesAchieved = myOrders.filter(o => (o.date || '').slice(0, 7) === monthKey).reduce((acc, o) => acc + o.grandTotal, 0);
   
   const target = (store.authSession.user as any)?.target || 350000;
   const achievementPct = target > 0 ? Math.min(100, Math.round((totalSalesAchieved / target) * 100)) : 0;
