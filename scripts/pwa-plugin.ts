@@ -210,7 +210,7 @@ export function pwaPlugin(site: Site): Plugin {
         `./icons/${site}/icon-512.png`,
         `./icons/${site}/apple-touch-icon.png`,
         `./icons/${site}/favicon-64.png`,
-        './vet_splash_icon.jpg',
+        './bioherbs_logo.jpg',
         ...files.filter((f) => f !== './index.html')
       ];
       const version = Date.now().toString(36);
