@@ -7,6 +7,7 @@
  */
 
 import type { Order } from './store.ts';
+import { LOGO_DATA_URI } from './logoData.ts';
 
 const money = (n: number) => (n || 0).toLocaleString('en-US', { maximumFractionDigits: 2 });
 
@@ -94,20 +95,38 @@ function tfootHtml(ord: Order): string {
   </tr></tfoot>`;
 }
 
-/** প্রতি পেজে একই হেডার + কাস্টমার/অর্ডার তথ্য */
+/** প্রতি পেজে একই হেডার: বামে লোগো ও কোম্পানি, ডানে Corporate Office / Factory, মাঝে INVOICE, তারপর কাস্টমার/অর্ডার তথ্য */
 function headerHtml(ord: Order): string {
+  const LOGO_H = 72;
+  const LOGO_W = Math.round(LOGO_H * 1260 / 832);
   return `
-    <div style="border-bottom:2px solid #059669;padding-bottom:15px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:flex-start;">
-      <div>
-        <h1 style="font-size:24px;font-weight:800;color:#047857;margin:0;letter-spacing:0.5px;">BH AGRO LTD.</h1>
-        <p style="font-size:11px;font-weight:bold;color:#475569;margin:2px 0 0 0;">Veterinary Pharmaceuticals &amp; Animal Nutrition Division</p>
-        <p style="font-size:10px;color:#64748b;margin:2px 0 0 0;">Head Office: 48 Motijheel C/A, Dhaka-1000 | Hotline: +880 1700-112233 | email: sales@bhagroltd.com</p>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:12px;border-bottom:2px solid #047857;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <img src="${LOGO_DATA_URI}" alt="Bioherbs" width="${LOGO_W}" height="${LOGO_H}" style="display:block;width:${LOGO_W}px;height:${LOGO_H}px;" />
+        <div style="text-align:left;line-height:1.45;">
+          <div style="font-size:15px;font-weight:bold;color:#0f172a;">Bioherbs Agrovet</div>
+          <div style="font-size:10px;color:#334155;">A DLS Approved Company</div>
+          <div style="font-size:10px;color:#334155;">Mfg. Lic. (DLS) No.: 282</div>
+        </div>
       </div>
-      <div style="text-align:right;">
-        <div style="background-color:#047857;color:white;padding:4px 12px;font-size:11px;font-weight:bold;border-radius:4px;display:inline-block;">DELIVERY CHALLAN &amp; TAX INVOICE</div>
-        <div style="font-family:monospace;font-size:13px;font-weight:bold;color:#0f172a;margin-top:6px;">INV: ${ord.id}</div>
+      <div style="display:flex;gap:18px;font-size:9.5px;line-height:1.45;color:#334155;text-align:left;">
+        <div>
+          <div style="font-weight:bold;color:#0f172a;">Corporate Office:</div>
+          <div>Bioherbs Bhaban,</div>
+          <div>Kakonhat, Godagari, Rajshahi.</div>
+          <div>Hotline: +8801772-852479</div>
+          <div>Email: bioherbsagrovet@gmail.com</div>
+        </div>
+        <div>
+          <div style="font-weight:bold;color:#0f172a;">Factory:</div>
+          <div>Malkamla, Kakonhat,</div>
+          <div>Godagari, Rajshahi.</div>
+          <div>Hotline: +8801736-409450</div>
+        </div>
       </div>
     </div>
+
+    <div style="text-align:center;font-size:22px;font-weight:800;letter-spacing:5px;color:#047857;margin:12px 0 14px 0;">INVOICE</div>
 
     <div style="display:flex;justify-content:space-between;margin-bottom:20px;font-size:11px;">
       <div style="width:55%;box-sizing:border-box;background-color:#f8fafc;padding:10px;border-radius:6px;border:1px solid #e2e8f0;">
@@ -119,6 +138,7 @@ function headerHtml(ord: Order): string {
       </div>
       <div style="width:40%;box-sizing:border-box;background-color:#f8fafc;padding:10px;border-radius:6px;border:1px solid #e2e8f0;">
         <div style="font-weight:bold;color:#047857;text-transform:uppercase;font-size:10px;margin-bottom:4px;">Order Details:</div>
+        <div><strong>Invoice No:</strong> <span style="font-family:monospace;font-weight:bold;">${ord.id}</span></div>
         <div><strong>Invoice Date:</strong> ${ord.date}</div>
         <div><strong>Field SR:</strong> ${ord.srName} (${ord.srId})</div>
         <div><strong>Delivery Status:</strong> CONFIRMED</div>
@@ -167,7 +187,7 @@ function lastBlockHtml(ord: Order): string {
     </div>
 
     <div style="text-align:center;font-size:9px;color:#94a3b8;margin-top:25px;">
-      This is a computer-generated invoice from BH Agro Ltd. ERP System.
+      This is a computer-generated invoice from Bioherbs Agrovet ERP System.
     </div>`;
 }
 
@@ -229,7 +249,7 @@ function pageHtml(ord: Order, idxs: number[], pageNo: number, total: number): st
     </table>
     ${isLast ? lastBlockHtml(ord) : ''}
     <div style="position:absolute;left:${PAD_X}px;right:${PAD_X}px;bottom:18px;display:flex;justify-content:space-between;align-items:center;font-size:10px;color:#64748b;border-top:1px solid #e2e8f0;padding-top:6px;">
-      <span>BH Agro Ltd. &#8226; INV: ${ord.id}</span>
+      <span>Bioherbs Agrovet &#8226; INV: ${ord.id}</span>
       <span style="font-weight:bold;color:#334155;">Page ${pageNo} of ${total}</span>
     </div>
   </div>`;
@@ -268,10 +288,15 @@ export function printInvoiceDocument(ord: Order) {
     </style></head>
     <body>${pagesHtml}</body></html>`);
   doc.close();
-  setTimeout(() => {
-    try { win.focus(); win.print(); } catch { window.print(); }
-    setTimeout(() => iframe.remove(), 2000);
-  }, 300);
+  const imgs = Array.from(doc.images);
+  const ready = Promise.all(imgs.map(im => im.complete ? Promise.resolve() :
+    new Promise<void>(res => { im.onload = () => res(); im.onerror = () => res(); })));
+  Promise.race([ready, new Promise(res => setTimeout(res, 2500))]).then(() => {
+    setTimeout(() => {
+      try { win.focus(); win.print(); } catch { window.print(); }
+      setTimeout(() => iframe.remove(), 2000);
+    }, 200);
+  });
 }
 
 // ---------------- PDF (A4, প্রতি পেজ আলাদা) ----------------
