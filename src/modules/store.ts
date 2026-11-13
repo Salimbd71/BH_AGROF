@@ -102,6 +102,8 @@ export interface AdminUser {
   email?: string;
   role: 'admin';
   pin?: string;
+  /** Firebase Authentication UID (অ্যাডমিন লগইন Firebase Auth দিয়ে হলে) */
+  fbUid?: string;
 }
 
 export const DB_STORAGE_KEY = 'bioherbs_agrovet_db_v5';
@@ -492,6 +494,11 @@ export class Store {
       this.authSession = { isLoggedIn: false, user: null, role: null };
       localStorage.setItem(SESSION_AUTH_KEY, JSON.stringify(this.authSession));
     }
+    // Firebase চালু থাকলে অ্যাডমিন সেশন শুধু Firebase Auth লগইন থেকেই বৈধ (পুরোনো সেশন বাতিল)
+    if (this.authSession.isLoggedIn && this.authSession.role === 'admin' && getFirebaseConfig() && !(this.authSession.user as AdminUser | null)?.fbUid) {
+      this.authSession = { isLoggedIn: false, user: null, role: null };
+      localStorage.setItem(SESSION_AUTH_KEY, JSON.stringify(this.authSession));
+    }
 
     // Initialize active tab from URL hash or user role
     const hashTab = (typeof window !== 'undefined' && window.location.hash) ? window.location.hash.replace('#', '') : '';
@@ -842,7 +849,7 @@ export class Store {
               if (rootVal && (rootVal.products || rootVal.srs || rootVal.admins || rootVal.customers)) {
                 updateFromSnapshot(rootVal);
               }
-            });
+            }, () => { /* rules root পড়তে দেয় না: ঠিক আছে */ });
           }
         });
         };
@@ -891,7 +898,61 @@ export class Store {
   }
 
   logout() {
+    const wasAdmin = this.authSession.role === 'admin';
     this.setAuth(null, null);
+    if (wasAdmin) this.resetToAnonymous();
+  }
+
+  /** অ্যাডমিন লগআউটের পর আবার অজ্ঞাত (anonymous) সাইন-ইন, যাতে লগইন স্ক্রিনে ডাটা আসে */
+  async resetToAnonymous() {
+    try {
+      const fb = (window as any).firebase;
+      if (!fb || typeof fb.auth !== 'function') return;
+      const auth = fb.auth();
+      if (auth.currentUser && !auth.currentUser.isAnonymous) await auth.signOut();
+      if (!auth.currentUser) await auth.signInAnonymously();
+    } catch (e) {
+      console.warn('Firebase anonymous re-sign-in failed:', e);
+    }
+  }
+
+  /**
+   * অ্যাডমিন লগইন: Firebase Authentication (ইমেইল = ইউজারনেম@bhagro.app) + roles/<uid> = "admin" যাচাই।
+   * Firebase কনফিগ না থাকলে (লোকাল ডেমো) আগের লোকাল অ্যাডমিন তালিকা থেকে লগইন।
+   */
+  async loginAdmin(username: string, password: string): Promise<AdminUser> {
+    const fb = (window as any).firebase;
+    if (!getFirebaseConfig() || !fb || typeof fb.auth !== 'function' || !this.firebaseDb) {
+      const local = (this.db.admins || []).find(a =>
+        (a.username === username || a.id.toLowerCase() === username.toLowerCase()) &&
+        (a.password === password || a.pin === password));
+      if (!local) throw new Error('invalid-credentials');
+      return local;
+    }
+    const auth = fb.auth();
+    const email = username.includes('@') ? username.toLowerCase() : `${username.toLowerCase()}@bhagro.app`;
+    const cred = await auth.signInWithEmailAndPassword(email, password);
+    const uid: string = cred.user.uid;
+    let role: unknown = null;
+    try {
+      role = (await this.firebaseDb.ref('roles/' + uid).once('value')).val();
+    } catch (e) {
+      role = null;
+    }
+    if (role !== 'admin') {
+      await this.resetToAnonymous();
+      throw new Error('not-admin');
+    }
+    return {
+      id: uid,
+      username: username.includes('@') ? username.split('@')[0] : username,
+      password: '',
+      name: username.includes('@') ? username.split('@')[0] : username,
+      phone: '',
+      territory: 'HQ',
+      role: 'admin',
+      fbUid: uid
+    };
   }
 
   // ===== SR helpers (সফট ডিলিট + আইডি নিরাপত্তা) =====

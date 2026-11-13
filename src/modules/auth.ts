@@ -153,7 +153,6 @@ export class AuthModule {
   renderSRManagementSection(): string {
     const srs = store.getActiveSrs();
     const formerSrs = store.getDeletedSrs();
-    const admins = store.db.admins || [];
     const isBN = store.lang === 'bn';
 
     return `
@@ -169,10 +168,6 @@ export class AuthModule {
             </p>
           </div>
           <div class="flex flex-wrap items-center gap-2">
-            <button onclick="window.AuthActions.openAddAdminModal()" class="px-3.5 py-2 rounded-xl bg-purple-700 hover:bg-purple-600 text-white font-bold text-xs shadow flex items-center gap-1.5 transition active:scale-95">
-              <i data-lucide="shield-plus" class="w-4 h-4"></i>
-              <span>${store.t('createAdminBtn')}</span>
-            </button>
 
             <button onclick="window.AuthActions.downloadTemplate()" class="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold hover:bg-slate-50 flex items-center gap-1.5 shadow-sm">
               <i data-lucide="download" class="w-3.5 h-3.5 text-brand-600"></i>
@@ -192,53 +187,12 @@ export class AuthModule {
           </div>
         </div>
 
-        <!-- Registered Admins List Section -->
-        <div class="p-5 rounded-3xl bg-purple-50/50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-900/60 shadow-sm space-y-3">
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-2 text-purple-900 dark:text-purple-300">
-              <i data-lucide="shield" class="w-5 h-5 text-purple-600"></i>
-              <h3 class="font-extrabold text-sm sm:text-base">${store.t('systemAdmins')} (${admins.length})</h3>
-            </div>
-            <button onclick="window.AuthActions.openAddAdminModal()" class="px-3 py-1.5 bg-purple-700 hover:bg-purple-600 text-white font-bold text-xs rounded-xl shadow-sm">
-              ${store.t('createAdminBtn')}
-            </button>
-          </div>
-
-          <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-            ${admins.length === 0 ? `
-              <div class="col-span-3 text-center py-6 text-slate-400 text-xs font-semibold">
-                ${isBN ? 'কোনো অ্যাডমিন অ্যাকাউন্ট পাওয়া যায়নি। "+ নতুন অ্যাডমিন" বাটনে ক্লিক করে তৈরি করুন।' : 'No Admin accounts found. Click "+ Create Admin" to add one.'}
-              </div>
-            ` : admins.map(a => `
-              <div class="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-purple-100 dark:border-purple-900/40 shadow-sm flex flex-col justify-between">
-                <div>
-                  <div class="flex items-center justify-between mb-1.5">
-                    <span class="text-xs font-mono font-bold text-purple-700 dark:text-purple-400 bg-purple-50 dark:bg-purple-950 px-2 py-0.5 rounded-md">${a.id}</span>
-                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300">
-                      ${isBN ? 'সেন্ট্রাল অ্যাডমিন' : 'Central Admin'}
-                    </span>
-                  </div>
-                  <h4 class="font-black text-sm text-slate-900 dark:text-white">${a.name}</h4>
-                  <div class="mt-2 p-2 rounded-xl bg-slate-50 dark:bg-slate-800 text-[11px] font-mono space-y-0.5">
-                    <div class="flex justify-between text-slate-500">
-                      <span>${isBN ? 'ইউজারনেম:' : 'Username:'}</span>
-                      <span class="font-bold text-purple-700 dark:text-purple-300">${a.username}</span>
-                    </div>
-                    <div class="flex justify-between text-slate-500">
-                      <span>${isBN ? 'পাসওয়ার্ড:' : 'Password:'}</span>
-                      <span class="font-bold text-slate-800 dark:text-slate-100">${a.password}</span>
-                    </div>
-                  </div>
-                  <p class="text-[11px] text-slate-500 mt-2">${a.territory || 'HQ'} • <span class="font-mono">${a.phone}</span></p>
-                </div>
-                <div class="mt-3 pt-2 border-t border-slate-100 dark:border-slate-800 flex justify-end">
-                  <button onclick="window.AuthActions.deleteAdmin('${a.id}')" class="text-xs text-rose-500 hover:underline">
-                    ${isBN ? 'মুছে ফেলুন' : 'Remove'}
-                  </button>
-                </div>
-              </div>
-            `).join('')}
-          </div>
+        <!-- Admin accounts info (অ্যাডমিন একাউন্ট Firebase Console থেকে পরিচালিত) -->
+        <div class="p-4 rounded-2xl bg-purple-50/60 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-900/60 text-[11px] text-purple-900 dark:text-purple-200 flex items-start gap-2">
+          <i data-lucide="shield" class="w-4 h-4 text-purple-600 shrink-0 mt-0.5"></i>
+          <span>${isBN
+            ? 'অ্যাডমিন একাউন্ট নিরাপত্তার জন্য Firebase Console (Authentication → Users) থেকে যোগ ও বাদ দেওয়া হয়। এখানে শুধু এসআর পরিচালনা করা যায়।'
+            : 'For security, admin accounts are added and removed in Firebase Console (Authentication → Users). SR accounts are managed here.'}</span>
         </div>
 
         <!-- SR Search Bar -->
