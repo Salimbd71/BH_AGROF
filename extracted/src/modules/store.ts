@@ -102,6 +102,8 @@ export interface AdminUser {
   email?: string;
   role: 'admin';
   pin?: string;
+  /** Firebase Authentication UID (অ্যাডমিন লগইন Firebase Auth দিয়ে হলে) */
+  fbUid?: string;
 }
 
 export const DB_STORAGE_KEY = 'bioherbs_agrovet_db_v5';
@@ -125,8 +127,8 @@ export const INITIAL_ORDERS: Order[] = [];
 
 export const I18N: Record<string, Record<string, string>> = {
   en: {
-    appName: 'BH Agro Ltd.',
-    tagline: 'Veterinary Pharmaceuticals & Animal Health ERP',
+    appName: 'Bioherbs Agrovet',
+    tagline: 'A DLS Approved Company',
     dashboard: 'Dashboard',
     orderBooking: 'Order Booking',
     customerList: 'Customer Directory',
@@ -282,8 +284,8 @@ export const I18N: Record<string, Record<string, string>> = {
     noCustomersAssignedSub: 'Please request new customer registration or ask the head office to assign customers to your SR ID.',
   },
   bn: {
-    appName: 'বিএইচ এগ্রো লি.',
-    tagline: 'ভেটেরিনারি ওষুধ ও প্রাণিস্বাস্থ্য পণ্য ইআরপি',
+    appName: 'বায়োহার্বস এগ্রোভেট',
+    tagline: 'A DLS Approved Company',
     dashboard: 'ড্যাশবোর্ড',
     orderBooking: 'অর্ডার বুকিং',
     customerList: 'গ্রাহকের তালিকা',
@@ -489,6 +491,11 @@ export class Store {
     };
     // এই সাইটের রুলস অনুযায়ী অনুমোদিত নয় এমন সেশন (যেমন SR সাইটে admin সেশন) বাতিল
     if (this.authSession.isLoggedIn && !canLoginAs(this.authSession.role)) {
+      this.authSession = { isLoggedIn: false, user: null, role: null };
+      localStorage.setItem(SESSION_AUTH_KEY, JSON.stringify(this.authSession));
+    }
+    // Firebase চালু থাকলে অ্যাডমিন সেশন শুধু Firebase Auth লগইন থেকেই বৈধ (পুরোনো সেশন বাতিল)
+    if (this.authSession.isLoggedIn && this.authSession.role === 'admin' && getFirebaseConfig() && !(this.authSession.user as AdminUser | null)?.fbUid) {
       this.authSession = { isLoggedIn: false, user: null, role: null };
       localStorage.setItem(SESSION_AUTH_KEY, JSON.stringify(this.authSession));
     }
@@ -777,6 +784,9 @@ export class Store {
           this.firebaseApp = fb.app();
         }
         this.firebaseDb = fb.database();
+
+        // সব লিসেনার/সিঙ্ক শুরু হয় অজ্ঞাত (anonymous) সাইন-ইনের পরে, যাতে rules (auth != null) এর সাথে কাজ করে
+        const attach = () => {
         this.isFirebaseReady = true;
 
         const updateFromSnapshot = (val: any) => {
@@ -839,9 +849,34 @@ export class Store {
               if (rootVal && (rootVal.products || rootVal.srs || rootVal.admins || rootVal.customers)) {
                 updateFromSnapshot(rootVal);
               }
-            });
+            }, () => { /* rules root পড়তে দেয় না: ঠিক আছে */ });
           }
         });
+        };
+
+        // ব্যবহারকারীর কিছু করতে হয় না: অ্যাপ নিজে পেছনে anonymous sign-in করে নেয়।
+        // সাইন-ইন ব্যর্থ হলেও (যেমন Anonymous চালু করা হয়নি) আগের মতো সংযোগ চেষ্টা করা হয়।
+        const auth = typeof fb.auth === 'function' ? fb.auth() : null;
+        if (!auth) {
+          attach();
+        } else {
+          let started = false;
+          let signing = false;
+          const go = () => { if (!started) { started = true; attach(); } };
+          const unsub = auth.onAuthStateChanged((u: any) => {
+            if (u) {
+              unsub();
+              go();
+            } else if (!signing) {
+              signing = true;
+              auth.signInAnonymously().catch((err: any) => {
+                console.warn('Firebase anonymous sign-in failed:', err);
+                unsub();
+                go();
+              });
+            }
+          });
+        }
       }
     } catch (e) {
       console.warn('Firebase initialization skipped/failed:', e);
@@ -863,7 +898,61 @@ export class Store {
   }
 
   logout() {
+    const wasAdmin = this.authSession.role === 'admin';
     this.setAuth(null, null);
+    if (wasAdmin) this.resetToAnonymous();
+  }
+
+  /** অ্যাডমিন লগআউটের পর আবার অজ্ঞাত (anonymous) সাইন-ইন, যাতে লগইন স্ক্রিনে ডাটা আসে */
+  async resetToAnonymous() {
+    try {
+      const fb = (window as any).firebase;
+      if (!fb || typeof fb.auth !== 'function') return;
+      const auth = fb.auth();
+      if (auth.currentUser && !auth.currentUser.isAnonymous) await auth.signOut();
+      if (!auth.currentUser) await auth.signInAnonymously();
+    } catch (e) {
+      console.warn('Firebase anonymous re-sign-in failed:', e);
+    }
+  }
+
+  /**
+   * অ্যাডমিন লগইন: Firebase Authentication (ইমেইল = ইউজারনেম@bhagro.app) + roles/<uid> = "admin" যাচাই।
+   * Firebase কনফিগ না থাকলে (লোকাল ডেমো) আগের লোকাল অ্যাডমিন তালিকা থেকে লগইন।
+   */
+  async loginAdmin(username: string, password: string): Promise<AdminUser> {
+    const fb = (window as any).firebase;
+    if (!getFirebaseConfig() || !fb || typeof fb.auth !== 'function' || !this.firebaseDb) {
+      const local = (this.db.admins || []).find(a =>
+        (a.username === username || a.id.toLowerCase() === username.toLowerCase()) &&
+        (a.password === password || a.pin === password));
+      if (!local) throw new Error('invalid-credentials');
+      return local;
+    }
+    const auth = fb.auth();
+    const email = username.includes('@') ? username.toLowerCase() : `${username.toLowerCase()}@bhagro.app`;
+    const cred = await auth.signInWithEmailAndPassword(email, password);
+    const uid: string = cred.user.uid;
+    let role: unknown = null;
+    try {
+      role = (await this.firebaseDb.ref('roles/' + uid).once('value')).val();
+    } catch (e) {
+      role = null;
+    }
+    if (role !== 'admin') {
+      await this.resetToAnonymous();
+      throw new Error('not-admin');
+    }
+    return {
+      id: uid,
+      username: username.includes('@') ? username.split('@')[0] : username,
+      password: '',
+      name: username.includes('@') ? username.split('@')[0] : username,
+      phone: '',
+      territory: 'HQ',
+      role: 'admin',
+      fbUid: uid
+    };
   }
 
   // ===== SR helpers (সফট ডিলিট + আইডি নিরাপত্তা) =====

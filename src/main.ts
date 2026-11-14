@@ -456,7 +456,7 @@ export const App = {
               <span class="px-3 py-1 rounded-full text-xs font-bold uppercase bg-brand-500/20 text-brand-300 border border-brand-500/30">
                 ${isBn ? 'সেন্ট্রাল অ্যাডমিন কন্ট্রোল সেন্টার' : 'Central Admin • Control Centre'}
               </span>
-              <h2 class="text-2xl sm:text-3xl font-extrabold mt-2 tracking-tight">${isBn ? 'বিএইচ এগ্রো লি. হেডকোয়ার্টার' : 'BH Agro Ltd. HQ'}</h2>
+              <h2 class="text-2xl sm:text-3xl font-extrabold mt-2 tracking-tight">${isBn ? 'বায়োহার্বস এগ্রোভেট হেডকোয়ার্টার' : 'Bioherbs Agrovet HQ'}</h2>
               <p class="text-sm text-slate-300 mt-1">${isBn ? 'জাতীয় ভেটেরিনারি বিক্রয় বিশ্লেষণ ও কেন্দ্রীয় ইনভেন্টরি কন্ট্রোল।' : 'Live national veterinary sales analytics and inventory control.'}</p>
             </div>
             <div class="flex items-center gap-2">
@@ -633,7 +633,7 @@ export const App = {
           <!-- Top row: App branding & ERP System Info -->
           <div class="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800 text-[11px]">
             <div class="flex items-center gap-2">
-              <span class="font-extrabold text-brand-700 dark:text-brand-400 text-sm">BH Agro Ltd.</span>
+              <span class="font-extrabold text-brand-700 dark:text-brand-400 text-sm">${isBn ? 'বায়োহার্বস এগ্রোভেট' : 'Bioherbs Agrovet'}</span>
               <span class="hidden sm:inline">•</span>
               <span class="font-medium">${isBn ? 'প্রাণিসম্পদ স্বাস্থ্য ও ওষুধ ব্যবস্থাপনা ইআরপি' : 'Veterinary Pharmaceuticals & Animal Health ERP'}</span>
             </div>

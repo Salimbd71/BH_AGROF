@@ -249,7 +249,7 @@ export class ReportModule {
               <h2 class="text-2xl sm:text-3xl font-extrabold tracking-tight">
                 ${isSR 
                   ? (isBN ? 'ফিল্ড সেলস রিপোর্ট' : 'Field Sales Reports') 
-                  : (isBN ? 'বিএইচ এগ্রো লি. - কেন্দ্রীয় সেলস রিপোর্ট' : 'BH Agro Ltd. - Central Sales Report')}
+                  : (isBN ? 'বায়োহার্বস এগ্রোভেট - কেন্দ্রীয় সেলস রিপোর্ট' : 'Bioherbs Agrovet - Central Sales Report')}
               </h2>
               <p class="text-xs sm:text-sm text-slate-300 mt-1">
                 ${isSR 

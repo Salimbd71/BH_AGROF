@@ -8,7 +8,7 @@ import type { AppRules } from '../types.ts';
 
 export const SR_RULES: AppRules = {
   mode: 'sr',
-  title: 'BH Agro Ltd. - SR Portal',
+  title: 'Bioherbs Agrovet - SR Portal',
   allowedRoles: ['sr'],
   defaultTab: 'home',
   tabs: ['home', 'customers', 'order_booking', 'products', 'my_orders', 'reports'],

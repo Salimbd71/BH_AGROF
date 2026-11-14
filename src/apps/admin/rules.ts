@@ -6,7 +6,7 @@ import type { AppRules } from '../types.ts';
 
 export const ADMIN_RULES: AppRules = {
   mode: 'admin',
-  title: 'BH Agro Ltd. - Admin Panel',
+  title: 'Bioherbs Agrovet - Admin Panel',
   allowedRoles: ['admin'],
   defaultTab: 'dashboard',
   tabs: [

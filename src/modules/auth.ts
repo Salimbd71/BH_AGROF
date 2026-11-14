@@ -18,11 +18,9 @@ export class AuthModule {
         <div class="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-8 shadow-2xl border border-slate-200 dark:border-slate-800">
           
           <div class="text-center mb-6">
-            <div class="w-14 h-14 rounded-2xl bg-gradient-to-tr from-brand-700 via-brand-600 to-tealbrand-500 mx-auto flex items-center justify-center text-white shadow-lg shadow-brand-500/30 mb-3">
-              <i data-lucide="leaf" class="w-8 h-8"></i>
-            </div>
+            <img src="/bioherbs_logo.jpg" alt="Bioherbs Agrovet" class="w-48 h-auto mx-auto block rounded-xl bg-white mb-3" />
             <h1 class="text-2xl font-black text-brand-900 dark:text-brand-300 tracking-tight">
-              ${isBN ? 'বিএইচ এগ্রো লি.' : 'BH AGRO LTD.'}
+              ${isBN ? 'বায়োহার্বস এগ্রোভেট' : 'BIOHERBS AGROVET'}
             </h1>
             <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">${store.t('tagline')}</p>
           </div>

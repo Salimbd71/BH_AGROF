@@ -456,7 +456,7 @@ export const App = {
               <span class="px-3 py-1 rounded-full text-xs font-bold uppercase bg-brand-500/20 text-brand-300 border border-brand-500/30">
                 ${isBn ? 'সেন্ট্রাল অ্যাডমিন কন্ট্রোল সেন্টার' : 'Central Admin • Control Centre'}
               </span>
-              <h2 class="text-2xl sm:text-3xl font-extrabold mt-2 tracking-tight">${isBn ? 'বিএইচ এগ্রো লি. হেডকোয়ার্টার' : 'BH Agro Ltd. HQ'}</h2>
+              <h2 class="text-2xl sm:text-3xl font-extrabold mt-2 tracking-tight">${isBn ? 'বায়োহার্বস এগ্রোভেট হেডকোয়ার্টার' : 'Bioherbs Agrovet HQ'}</h2>
               <p class="text-sm text-slate-300 mt-1">${isBn ? 'জাতীয় ভেটেরিনারি বিক্রয় বিশ্লেষণ ও কেন্দ্রীয় ইনভেন্টরি কন্ট্রোল।' : 'Live national veterinary sales analytics and inventory control.'}</p>
             </div>
             <div class="flex items-center gap-2">
@@ -633,7 +633,7 @@ export const App = {
           <!-- Top row: App branding & ERP System Info -->
           <div class="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800 text-[11px]">
             <div class="flex items-center gap-2">
-              <span class="font-extrabold text-brand-700 dark:text-brand-400 text-sm">BH Agro Ltd.</span>
+              <span class="font-extrabold text-brand-700 dark:text-brand-400 text-sm">${isBn ? 'বায়োহার্বস এগ্রোভেট' : 'Bioherbs Agrovet'}</span>
               <span class="hidden sm:inline">•</span>
               <span class="font-medium">${isBn ? 'প্রাণিসম্পদ স্বাস্থ্য ও ওষুধ ব্যবস্থাপনা ইআরপি' : 'Veterinary Pharmaceuticals & Animal Health ERP'}</span>
             </div>
@@ -1418,42 +1418,33 @@ export const App = {
     const userInput = (document.getElementById('adminLoginUsername') as HTMLInputElement).value.trim();
     const passInput = (document.getElementById('adminLoginPassword') as HTMLInputElement).value.trim();
 
-    const admins = store.db.admins || [];
-    const foundAdmin = admins.find(a => 
-      (a.username === userInput || a.id.toLowerCase() === userInput.toLowerCase()) && 
-      (a.password === passInput || a.pin === passInput)
-    );
-
-    if (foundAdmin) {
-      store.setAuth(foundAdmin, 'admin');
-      showToast(store.lang === 'bn' ? `স্বাগতম অ্যাডমিন ${foundAdmin.name}!` : `Welcome Admin ${foundAdmin.name}!`);
+    const isBN = store.lang === 'bn';
+    const btn = document.querySelector('#adminLoginFormSection button[type="submit"]') as HTMLButtonElement | null;
+    if (btn) btn.disabled = true;
+    store.loginAdmin(userInput, passInput).then(adm => {
+      store.setAuth(adm, 'admin');
+      showToast(isBN ? `স্বাগতম অ্যাডমিন ${adm.name}!` : `Welcome Admin ${adm.name}!`);
       App.render();
-    } else {
-      showToast(store.lang === 'bn' ? 'ভুল অ্যাডমিন ইউজারনেম বা পাসওয়ার্ড!' : 'Invalid Admin credentials!', 'error');
-    }
+    }).catch((err: any) => {
+      if (btn) btn.disabled = false;
+      const code = String(err?.code || err?.message || '');
+      let msg = isBN ? 'ভুল অ্যাডমিন ইউজারনেম বা পাসওয়ার্ড!' : 'Invalid Admin credentials!';
+      if (code.includes('not-admin')) msg = isBN ? 'এই একাউন্টটি অ্যাডমিন হিসেবে অনুমোদিত নয়।' : 'This account is not authorized as Admin.';
+      else if (code.includes('network')) msg = isBN ? 'ইন্টারনেট সংযোগ পরীক্ষা করুন।' : 'Network error. Check your internet connection.';
+      else if (code.includes('operation-not-allowed')) msg = isBN ? 'Firebase-এ Email/Password সাইন-ইন চালু করা নেই।' : 'Email/Password sign-in is not enabled in Firebase.';
+      else if (code.includes('too-many-requests')) msg = isBN ? 'অনেকবার ভুল হয়েছে। কিছুক্ষণ পরে চেষ্টা করুন।' : 'Too many attempts. Try again later.';
+      showToast(msg, 'error');
+    });
   },
   openAddAdminModal: () => {
-    if (!canLoginAs('admin')) return; // শুধু অ্যাডমিন সাইটে অ্যাডমিন তৈরি করা যাবে
-    authModule.openAddAdminModal(() => {
-      showToast('New Admin account created and synced to Firebase!');
-      App.render();
-    });
+    showToast(store.lang === 'bn'
+      ? 'অ্যাডমিন যোগ করতে Firebase Console → Authentication → Users ব্যবহার করুন।'
+      : 'Add admins from Firebase Console → Authentication → Users.', 'error');
   },
-  deleteAdmin: (id: string) => {
-    const adm = (store.db.admins || []).find(a => a.id === id);
-    showConfirmDialog({
-      title: 'Remove Admin Account',
-      message: `Are you sure you want to remove admin account "${adm?.name || id}"?`,
-      confirmText: 'Yes, Remove Admin',
-      type: 'danger',
-      onConfirm: () => {
-        if (!store.db.admins) return;
-        store.db.admins = store.db.admins.filter(a => a.id !== id);
-        store.saveDatabase();
-        showToast('Admin account removed.');
-        App.render();
-      }
-    });
+  deleteAdmin: (_id: string) => {
+    showToast(store.lang === 'bn'
+      ? 'অ্যাডমিন সরাতে Firebase Console ব্যবহার করুন।'
+      : 'Remove admins from Firebase Console.', 'error');
   },
   openAddSRModal: () => {
     authModule.openAddSRModal(() => App.render());

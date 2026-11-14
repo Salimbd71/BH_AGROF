@@ -127,14 +127,12 @@ export function renderTopNav(isAdmin: boolean): string {
           </button>
 
           <div class="flex items-center gap-3 cursor-pointer" onclick="window.App.navigate('${isAdmin ? 'dashboard' : 'home'}')">
-            <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-700 via-brand-600 to-tealbrand-500 flex items-center justify-center text-white shadow-md shadow-brand-500/20">
-              <i data-lucide="leaf" class="w-6 h-6"></i>
-            </div>
+            <img src="/bioherbs_logo.jpg" alt="Bioherbs Agrovet" class="h-10 sm:h-11 w-auto block rounded-lg bg-white shrink-0" />
             <div>
               <div class="flex items-center gap-2">
-                <span class="font-extrabold text-lg sm:text-xl tracking-tight text-brand-900 dark:text-brand-300">BH AGRO</span>
-                <span class="text-xs px-2 py-0.5 rounded-full font-bold uppercase ${isAdmin ? 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300' : 'bg-brand-100 text-brand-800 dark:bg-brand-950 dark:text-brand-300'}">
-                  LTD.
+                <span class="font-extrabold text-base sm:text-xl tracking-tight text-brand-900 dark:text-brand-300">Bioherbs Agrovet</span>
+                <span class="hidden sm:inline-block text-xs px-2 py-0.5 rounded-full font-bold uppercase ${isAdmin ? 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300' : 'bg-brand-100 text-brand-800 dark:bg-brand-950 dark:text-brand-300'}">
+                  ${isAdmin ? 'ADMIN' : 'SR'}
                 </span>
               </div>
               <p class="text-[11px] font-medium text-slate-500 dark:text-slate-400 hidden sm:block">${store.authSession.user?.name} • ${store.authSession.user?.territory}</p>

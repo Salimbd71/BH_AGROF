@@ -127,8 +127,8 @@ export const INITIAL_ORDERS: Order[] = [];
 
 export const I18N: Record<string, Record<string, string>> = {
   en: {
-    appName: 'BH Agro Ltd.',
-    tagline: 'Veterinary Pharmaceuticals & Animal Health ERP',
+    appName: 'Bioherbs Agrovet',
+    tagline: 'A DLS Approved Company',
     dashboard: 'Dashboard',
     orderBooking: 'Order Booking',
     customerList: 'Customer Directory',
@@ -284,8 +284,8 @@ export const I18N: Record<string, Record<string, string>> = {
     noCustomersAssignedSub: 'Please request new customer registration or ask the head office to assign customers to your SR ID.',
   },
   bn: {
-    appName: 'বিএইচ এগ্রো লি.',
-    tagline: 'ভেটেরিনারি ওষুধ ও প্রাণিস্বাস্থ্য পণ্য ইআরপি',
+    appName: 'বায়োহার্বস এগ্রোভেট',
+    tagline: 'A DLS Approved Company',
     dashboard: 'ড্যাশবোর্ড',
     orderBooking: 'অর্ডার বুকিং',
     customerList: 'গ্রাহকের তালিকা',

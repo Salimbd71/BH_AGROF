@@ -13,11 +13,11 @@ const SITE_META: Record<Site, {
   shortcuts: { name: string; url: string }[];
 }> = {
   sr: {
-    title: 'BH Agro Ltd. - SR Portal',
-    name: 'BH Agro SR Portal',
-    shortName: 'BH SR',
+    title: 'Bioherbs Agrovet - SR Portal',
+    name: 'Bioherbs Agrovet SR',
+    shortName: 'Bioherbs SR',
     theme: '#059669',
-    description: 'BH Agro Ltd. SR order booking',
+    description: 'Bioherbs Agrovet SR order booking',
     shortcuts: [
       { name: 'Order Booking', url: './#order_booking' },
       { name: 'Products', url: './#products' },
@@ -25,11 +25,11 @@ const SITE_META: Record<Site, {
     ]
   },
   admin: {
-    title: 'BH Agro Ltd. - Admin Panel',
-    name: 'BH Agro Admin Panel',
-    shortName: 'BH Admin',
+    title: 'Bioherbs Agrovet - Admin Panel',
+    name: 'Bioherbs Agrovet Admin',
+    shortName: 'Bioherbs Admin',
     theme: '#6d28d9',
-    description: 'BH Agro Ltd. admin panel',
+    description: 'Bioherbs Agrovet admin panel',
     shortcuts: [
       { name: 'Dashboard', url: './#dashboard' },
       { name: 'Orders', url: './#orders_management' },
@@ -210,7 +210,7 @@ export function pwaPlugin(site: Site): Plugin {
         `./icons/${site}/icon-512.png`,
         `./icons/${site}/apple-touch-icon.png`,
         `./icons/${site}/favicon-64.png`,
-        './vet_splash_icon.jpg',
+        './bioherbs_logo.jpg',
         ...files.filter((f) => f !== './index.html')
       ];
       const version = Date.now().toString(36);
