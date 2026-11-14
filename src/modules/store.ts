@@ -66,7 +66,8 @@ export interface Order {
   subtotal: number;
   discount: number;
   grandTotal: number;
-  status: 'confirmed';
+  /** pending = এসআর পাঠিয়েছে, অ্যাডমিন কনফার্ম করেনি; পুরোনো অর্ডার 'confirmed' */
+  status: 'confirmed' | 'pending';
   paymentStatus: string;
   notes?: string;
   /** TP অনুযায়ী মোট (ছাড়ের আগে) ও প্রোডাক্ট ছাড়ের মোট; subtotal = ADP অনুযায়ী মোট */
@@ -448,6 +449,8 @@ export interface DBState {
   orders: Order[];
   srs: SRUser[];
   admins: AdminUser[];
+  /** অ্যাডমিনের কনফার্ম তালিকা: অর্ডার আইডি → কখন/কে (আলাদা নোডে, তাই এসআরের অর্ডার লেখার সাথে সংঘর্ষ হয় না) */
+  confirmations?: Record<string, { at: string; by: string }>;
   lastUpdated: string;
 }
 
@@ -578,6 +581,7 @@ export class Store {
           orders: Array.isArray(parsed.orders) ? parsed.orders : [],
           srs: Array.isArray(parsed.srs) ? parsed.srs : [],
           admins: Array.isArray(parsed.admins) ? parsed.admins : [],
+          confirmations: parsed.confirmations && typeof parsed.confirmations === 'object' && !Array.isArray(parsed.confirmations) ? parsed.confirmations : {},
           lastUpdated: parsed.lastUpdated || new Date().toISOString()
         };
       } catch (e) {
@@ -594,6 +598,7 @@ export class Store {
       orders: [],
       srs: [],
       admins: [],
+      confirmations: {},
       lastUpdated: new Date().toISOString()
     };
     if (syncToCloud) {
@@ -730,7 +735,7 @@ export class Store {
    * ফোনে সেভ হয়েছে কিন্তু ক্লাউডে পৌঁছায়নি এমন নতুন অর্ডার/কাস্টমার ক্লাউডের ডাটার সাথে জুড়ে দেয়।
    * (অ্যাডমিন যা মুছে দিয়েছে তা ফিরে আসে না)
    */
-  private mergeUnsynced(remote: { products: Product[]; customers: Customer[]; orders: Order[]; srs: SRUser[]; admins: AdminUser[] }) {
+  private mergeUnsynced(remote: { products: Product[]; customers: Customer[]; orders: Order[]; srs: SRUser[]; admins: AdminUser[]; confirmations: Record<string, { at: string; by: string }> }) {
     const synced = this.loadSyncedIds();
     const remoteOrderIds = new Set(remote.orders.map(o => o.id));
     const remoteCustIds = new Set(remote.customers.map(c => c.id));
@@ -752,6 +757,45 @@ export class Store {
       },
       added: newOrders.length + newCustomers.length
     };
+  }
+
+  // ================= অর্ডার কনফার্ম =================
+  private confKey(orderId: string): string {
+    return String(orderId).replace(/[.#$\[\]\/]/g, '_');
+  }
+
+  /** পুরোনো অর্ডার (status='confirmed') বা অ্যাডমিন কনফার্ম করেছে এমন অর্ডার */
+  isOrderConfirmed(o: Order): boolean {
+    return o.status === 'confirmed' || !!(this.db.confirmations && this.db.confirmations[this.confKey(o.id)]);
+  }
+
+  getOrderConfirmation(o: Order): { at: string; by: string } | undefined {
+    return this.db.confirmations ? this.db.confirmations[this.confKey(o.id)] : undefined;
+  }
+
+  /** শুধু অ্যাডমিন। কনফার্ম আলাদা নোডে (bioherbs_agrovet/confirmations/<id>) লেখা হয়, অর্ডার তালিকা বদলায় না। */
+  async confirmOrder(orderId: string): Promise<boolean> {
+    if (this.authSession.role !== 'admin') return false;
+    const ord = this.db.orders.find(o => o.id === orderId);
+    if (!ord) return false;
+    if (this.isOrderConfirmed(ord)) return true;
+    const key = this.confKey(orderId);
+    const rec = { at: new Date().toISOString(), by: this.authSession.user?.name || 'Admin' };
+    this.db.confirmations = { ...(this.db.confirmations || {}), [key]: rec };
+    try { localStorage.setItem(DB_STORAGE_KEY, JSON.stringify(this.db)); } catch { /* ignore */ }
+    if (this.isFirebaseReady && this.firebaseDb) {
+      try {
+        await this.firebaseDb.ref('bioherbs_agrovet/confirmations/' + key).set(rec);
+      } catch (err) {
+        console.warn('Firebase confirm failed:', err);
+        const next = { ...(this.db.confirmations || {}) };
+        delete next[key];
+        this.db.confirmations = next;
+        try { localStorage.setItem(DB_STORAGE_KEY, JSON.stringify(this.db)); } catch { /* ignore */ }
+        return false;
+      }
+    }
+    return true;
   }
 
   saveDatabase() {
@@ -798,7 +842,9 @@ export class Store {
           const srs = Array.isArray(target.srs) ? target.srs : (target.srs ? Object.values(target.srs) : []);
           const admins = Array.isArray(target.admins) ? target.admins : (target.admins ? Object.values(target.admins) : []);
 
+          const confirmations = (target.confirmations && typeof target.confirmations === 'object' && !Array.isArray(target.confirmations)) ? target.confirmations : {};
           const remote = {
+            confirmations: confirmations as Record<string, { at: string; by: string }>,
             products: products as Product[],
             customers: customers as Customer[],
             orders: orders as Order[],

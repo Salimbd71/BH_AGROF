@@ -789,7 +789,7 @@ export class OrderModule {
       productDiscount: Math.max(0, tpSubtotal - subtotal),
       discount: discount,
       grandTotal: grandTotal,
-      status: 'confirmed', // Direct confirmation without admin approval!
+      status: 'pending', // অ্যাডমিন কনফার্ম করলে Confirmed হবে
       paymentStatus: 'Credit Account',
       notes: store.cart.notes || ''
     };

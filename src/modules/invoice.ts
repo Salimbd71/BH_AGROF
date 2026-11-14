@@ -6,6 +6,7 @@
  * ফাইলের নাম: <customer_name>_<customer_id>_<ddmmyyyy>.pdf  (যেমন Amin_feed_BH0002_06112026.pdf)
  */
 
+import { store } from './store.ts';
 import type { Order } from './store.ts';
 import { LOGO_DATA_URI } from './logoData.ts';
 
@@ -141,7 +142,7 @@ function headerHtml(ord: Order): string {
         <div><strong>Invoice No:</strong> <span style="font-family:monospace;font-weight:bold;">${ord.id}</span></div>
         <div><strong>Invoice Date:</strong> ${ord.date}</div>
         <div><strong>Field SR:</strong> ${ord.srName} (${ord.srId})</div>
-        <div><strong>Delivery Status:</strong> CONFIRMED</div>
+        <div><strong>Delivery Status:</strong> ${store.isOrderConfirmed(ord) ? 'CONFIRMED' : 'PENDING'}</div>
       </div>
     </div>`;
 }

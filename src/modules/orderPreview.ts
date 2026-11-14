@@ -197,6 +197,7 @@ function paint() {
   } else if (admin) {
     footer = [
       iconBtn('printer', isBn() ? 'প্রিন্ট' : 'Print', 'window.OrderPreviewActions.print()', 'bg-brand-600 text-white hover:bg-brand-500'),
+      store.isOrderConfirmed(ord) ? '' : iconBtn('check-circle', isBn() ? 'কনফার্ম' : 'Confirm', 'window.OrderPreviewActions.confirm()', 'bg-emerald-600 text-white hover:bg-emerald-500'),
       iconBtn('download', isBn() ? 'ডাউনলোড' : 'Download', 'window.OrderPreviewActions.download()', 'bg-sky-600 text-white hover:bg-sky-500'),
       iconBtn('pencil', isBn() ? 'এডিট' : 'Edit', 'window.OrderPreviewActions.edit()', 'bg-amber-500 text-white hover:bg-amber-400'),
       iconBtn('x', isBn() ? 'বন্ধ' : 'Close', 'window.OrderPreviewActions.close()', 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200')
@@ -270,6 +271,17 @@ function attachGlobalListeners() {
 (window as any).OrderPreviewActions = {
   close: () => closePreview(),
   print: () => { const o = requireAdmin(); if (o) printInvoiceDocument(o); },
+  confirm: async () => {
+    const o = requireAdmin();
+    if (!o) return;
+    const ok = await store.confirmOrder(o.id);
+    showToast(ok
+      ? (isBn() ? `অর্ডার ${o.id} নিশ্চিত হয়েছে` : `Order ${o.id} confirmed`)
+      : (isBn() ? 'কনফার্ম সংরক্ষণ হয়নি। ইন্টারনেট ও Firebase Rules দেখুন।' : 'Could not save confirmation. Check internet and Firebase rules.'),
+      ok ? 'success' : 'error');
+    if (document.getElementById(MODAL_ID)) paint();
+    (window as any).App?.render?.();
+  },
   download: () => { const o = requireAdmin(); if (o) generateInvoicePDF(o, showToast); },
   edit: () => {
     const o = requireAdmin();
