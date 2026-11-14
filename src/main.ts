@@ -3,7 +3,7 @@
  * Coordinates Modular Architecture, Router, and UI Rendering
  */
 
-import { store } from './modules/store.ts';
+import { store, type Order } from './modules/store.ts';
 import { router } from './modules/router.ts';
 import { authModule } from './modules/auth.ts';
 import { customerModule } from './modules/customers.ts';
@@ -29,7 +29,21 @@ function setProductOffer(p: any, discountPct: number, tiers: FreeTier[]) {
 }
 
 // Main Application Controller
+const todayStr = () => new Date().toISOString().split('T')[0];
+
+const statusBadge = (o: Order, isBn: boolean): string => store.isOrderConfirmed(o)
+  ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">${isBn ? 'নিশ্চিত' : 'Confirmed'}</span>`
+  : `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">${isBn ? 'অপেক্ষমাণ' : 'Pending'}</span>`;
+
+const confirmButton = (o: Order, isBn: boolean): string => (store.authSession.role === 'admin' && !store.isOrderConfirmed(o))
+  ? `<button onclick="window.App.confirmOrderUI('${o.id}')" class="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] shadow-sm flex items-center gap-1 active:scale-95 transition">
+       <i data-lucide="check-circle" class="w-3.5 h-3.5"></i><span>${isBn ? 'কনফার্ম' : 'Confirm'}</span>
+     </button>`
+  : '';
+
 export const App = {
+  todayOpenSr: '' as string,
+
   navigate(tab: string) {
     router.navigate(tab, () => this.render());
   },
@@ -347,9 +361,7 @@ export const App = {
                 <div class="flex items-center gap-2 mb-1">
                   <span class="font-mono font-bold text-xs text-brand-700 dark:text-brand-400">${o.id}</span>
                   <span class="text-xs text-slate-400">• ${o.date}</span>
-                  <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                    ${isBn ? 'নিশ্চিত' : 'CONFIRMED'}
-                  </span>
+                  ${statusBadge(o, isBn)}
                 </div>
                 <h4 class="font-extrabold text-base text-slate-900 dark:text-white">
                   <span class="font-mono text-brand-700">${o.customerId}</span> ${o.customerShopName || o.customerName}
@@ -383,7 +395,7 @@ export const App = {
               <i data-lucide="clipboard-list" class="w-6 h-6 text-brand-600"></i>
               <span>${isBn ? 'সকল ফিল্ড অর্ডার ও ইনভয়েস' : 'All Field Orders & Invoices'}</span>
             </h2>
-            <p class="text-xs text-slate-500">${isBn ? 'অর্ডারসমূহ স্বয়ংক্রিয়ভাবে নিশ্চিত হয়। অ্যাডমিন ইনভয়েস প্রিন্ট বা অর্ডার ডিলিট করতে পারেন।' : 'Orders are confirmed automatically. Admin can print invoice or delete orders.'}</p>
+            <p class="text-xs text-slate-500">${isBn ? 'এসআরের পাঠানো অর্ডার প্রথমে "অপেক্ষমাণ" থাকে; কনফার্ম করলে "নিশ্চিত" হয়। অ্যাডমিন ইনভয়েস প্রিন্ট বা অর্ডার ডিলিট করতে পারেন।' : 'SR orders start as Pending; Confirm marks them Confirmed. Admin can print invoices or delete orders.'}</p>
           </div>
         </div>
 
@@ -413,12 +425,11 @@ export const App = {
                   <td class="py-3 text-slate-500 max-w-[180px] truncate">${o.customerAddress || o.territory}</td>
                   <td class="py-3 font-black text-slate-900 dark:text-white">৳${o.grandTotal.toLocaleString()}</td>
                   <td class="py-3">
-                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                      ${isBn ? 'নিশ্চিত' : 'Confirmed'}
-                    </span>
+                    ${statusBadge(o, isBn)}
                   </td>
                   <td class="py-3 text-right">
                     <div class="flex items-center justify-end gap-1.5">
+                      ${confirmButton(o, isBn)}
                       <button onclick="window.App.previewOrder('${o.id}')" class="px-2.5 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-[11px] shadow-sm flex items-center gap-1" title="${store.t('printInvoice')}">
                         <i data-lucide="eye" class="w-3.5 h-3.5"></i>
                         <span>${isBn ? 'প্রিভিউ / প্রিন্ট' : 'Preview / Print'}</span>
@@ -435,6 +446,127 @@ export const App = {
         </div>
       </div>
     `;
+  },
+
+  /** ড্যাশবোর্ডের অর্ডার সারি (Preview/Print + Confirm) */
+  dashOrderRow(o: Order, isBn: boolean): string {
+    return `
+      <div class="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800">
+        <div class="min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="font-mono font-bold text-xs text-brand-700 dark:text-brand-400">${o.id}</span>
+            ${statusBadge(o, isBn)}
+          </div>
+          <div class="text-xs text-slate-700 dark:text-slate-300 font-semibold truncate">
+            <span class="font-mono text-brand-700">${o.customerId}</span> ${o.customerShopName || o.customerName}
+            <span class="text-slate-400 font-normal">• ৳${o.grandTotal.toLocaleString()}</span>
+          </div>
+        </div>
+        <div class="flex items-center gap-1.5">
+          ${confirmButton(o, isBn)}
+          <button onclick="window.App.previewOrder('${o.id}')" class="px-2.5 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-[11px] shadow-sm flex items-center gap-1">
+            <i data-lucide="eye" class="w-3.5 h-3.5"></i>
+            <span>${isBn ? 'প্রিভিউ / প্রিন্ট' : 'Preview / Print'}</span>
+          </button>
+        </div>
+      </div>`;
+  },
+
+  /** Today Order: এসআর-ভিত্তিক আজকের অর্ডার সংখ্যা; সংখ্যায় ক্লিক করলে ওই এসআরের আজকের অর্ডার */
+  renderTodayOrders(): string {
+    const isBn = store.lang === 'bn';
+    const today = todayStr();
+    const todays = store.db.orders.filter(o => o.date === today);
+    const groups: Record<string, { name: string; orders: Order[] }> = {};
+    todays.forEach(o => {
+      if (!groups[o.srId]) groups[o.srId] = { name: o.srName, orders: [] };
+      groups[o.srId].orders.push(o);
+    });
+    const rows = Object.keys(groups).map(id => ({ id, ...groups[id] })).sort((a, b) => b.orders.length - a.orders.length);
+    const pendingTotal = todays.filter(o => !store.isOrderConfirmed(o)).length;
+
+    return `
+      <div class="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <h3 class="font-black text-base text-slate-900 dark:text-white flex items-center gap-2">
+            <i data-lucide="calendar-days" class="w-5 h-5 text-brand-600"></i>
+            <span>${isBn ? 'আজকের অর্ডার (Today Order)' : 'Today Order'}</span>
+            <span class="text-xs font-mono font-bold text-slate-400">${today}</span>
+          </h3>
+          <div class="text-xs font-bold text-slate-500">
+            ${isBn ? 'মোট' : 'Total'}: <span class="text-slate-900 dark:text-white">${todays.length}</span>
+            ${pendingTotal > 0 ? `• <span class="text-amber-600">${pendingTotal} ${isBn ? 'অপেক্ষমাণ' : 'pending'}</span>` : ''}
+          </div>
+        </div>
+        ${rows.length === 0 ? `
+          <div class="text-center py-6 text-xs text-slate-400 font-semibold">${isBn ? 'আজ এখনও কোনো অর্ডার আসেনি।' : 'No orders received today yet.'}</div>
+        ` : `
+          <div class="space-y-2">
+            ${rows.map(r => {
+              const pend = r.orders.filter(o => !store.isOrderConfirmed(o)).length;
+              const open = this.todayOpenSr === r.id;
+              return `
+              <div class="rounded-2xl border ${open ? 'border-brand-300 dark:border-brand-800' : 'border-slate-100 dark:border-slate-800'}">
+                <div class="flex items-center justify-between gap-3 px-3 py-2.5">
+                  <div class="min-w-0">
+                    <div class="font-bold text-sm text-slate-900 dark:text-white truncate">${r.name}</div>
+                    <div class="text-[11px] font-mono text-slate-400">${r.id}</div>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    ${pend > 0
+                      ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">${pend} ${isBn ? 'অপেক্ষমাণ' : 'Pending'}</span>`
+                      : `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">${isBn ? 'সব নিশ্চিত' : 'All confirmed'}</span>`}
+                    <button onclick="window.App.toggleTodaySr('${r.id}')" title="${isBn ? 'অর্ডারগুলো দেখুন' : 'View orders'}" class="min-w-[2.5rem] h-9 px-3 rounded-xl font-black text-sm ${open ? 'bg-brand-600 text-white' : 'bg-brand-50 dark:bg-brand-950/60 text-brand-700 dark:text-brand-300 hover:bg-brand-100'} active:scale-95 transition">${r.orders.length}</button>
+                  </div>
+                </div>
+                ${open ? `<div class="px-3 pb-3 space-y-2">${r.orders.map(o => this.dashOrderRow(o, isBn)).join('')}</div>` : ''}
+              </div>`;
+            }).join('')}
+          </div>
+        `}
+      </div>`;
+  },
+
+  /** বিগত তারিখের কনফার্ম না হওয়া অর্ডার, তারিখ অনুযায়ী (আজকের অর্ডারের উপরে) */
+  renderPendingPast(): string {
+    const isBn = store.lang === 'bn';
+    const today = todayStr();
+    const past = store.db.orders.filter(o => o.date < today && !store.isOrderConfirmed(o));
+    if (past.length === 0) return '';
+    const dates = Array.from(new Set(past.map(o => o.date))).sort().reverse();
+    return `
+      <div class="p-5 rounded-3xl bg-amber-50/70 dark:bg-amber-950/20 border border-amber-300 dark:border-amber-800 shadow-sm">
+        <h3 class="font-black text-base text-amber-800 dark:text-amber-300 flex items-center gap-2 mb-3">
+          <i data-lucide="alert-triangle" class="w-5 h-5"></i>
+          <span>${isBn ? 'বিগত তারিখের কনফার্ম না হওয়া অর্ডার' : 'Unconfirmed orders from earlier dates'}</span>
+          <span class="text-xs font-bold">(${past.length})</span>
+        </h3>
+        <div class="space-y-4">
+          ${dates.map(d => {
+            const list = past.filter(o => o.date === d);
+            return `
+              <div>
+                <div class="text-xs font-black font-mono text-amber-800 dark:text-amber-300 mb-1.5">${d} <span class="font-sans font-bold text-amber-600">• ${list.length} ${isBn ? 'টি' : 'orders'}</span></div>
+                <div class="space-y-2">${list.map(o => this.dashOrderRow(o, isBn)).join('')}</div>
+              </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+  },
+
+  toggleTodaySr(srId: string) {
+    this.todayOpenSr = this.todayOpenSr === srId ? '' : srId;
+    this.render();
+  },
+
+  /** অ্যাডমিন কনফার্ম (অর্ডার তালিকা/ড্যাশবোর্ড থেকে) */
+  async confirmOrderUI(orderId: string) {
+    if (store.authSession.role !== 'admin') return;
+    const ok = await store.confirmOrder(orderId);
+    const isBn = store.lang === 'bn';
+    if (ok) showToast(isBn ? `অর্ডার ${orderId} নিশ্চিত হয়েছে` : `Order ${orderId} confirmed`, 'success');
+    else showToast(isBn ? 'কনফার্ম সংরক্ষণ হয়নি। ইন্টারনেট ও Firebase Rules দেখুন।' : 'Could not save confirmation. Check internet and Firebase rules.', 'error');
+    this.render();
   },
 
   renderAdminDashboard(): string {
@@ -471,6 +603,9 @@ export const App = {
             </div>
           </div>
         </div>
+
+        ${this.renderPendingPast()}
+        ${this.renderTodayOrders()}
 
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <div class="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
